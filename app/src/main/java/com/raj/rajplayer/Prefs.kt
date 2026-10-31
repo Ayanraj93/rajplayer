@@ -15,4 +15,11 @@ object Prefs {
     fun setText(c: Context, v: Int) { p(c).edit().putInt("text", v).apply() }
     fun setAccent(c: Context, v: Int) { p(c).edit().putInt("accent", v).apply() }
     fun setWall(c: Context, v: String?) { p(c).edit().putString("wall", v).apply() }
+
+    fun pos(c: Context, key: String): Long = p(c).getLong("pos_" + key, 0L)
+    fun setPos(c: Context, key: String, v: Long) {
+        val e = p(c).edit()
+        if (v <= 0L) e.remove("pos_" + key) else e.putLong("pos_" + key, v)
+        e.apply()
+    }
 }
