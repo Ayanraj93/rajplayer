@@ -4,11 +4,11 @@ import android.content.Context
 import android.graphics.Color
 
 object Prefs {
-    private fun p(c: Context) = c.getSharedPreferences("rajplayer", Context.MODE_PRIVATE)
+    private fun p(c: Context) = c.getSharedPreferences("rajplayer_ultra", Context.MODE_PRIVATE)
 
-    fun bg(c: Context): Int = p(c).getInt("bg", Color.parseColor("#101418"))
+    fun bg(c: Context): Int = p(c).getInt("bg", Color.parseColor("#0B0F14"))
     fun text(c: Context): Int = p(c).getInt("text", Color.WHITE)
-    fun accent(c: Context): Int = p(c).getInt("accent", Color.parseColor("#00C853"))
+    fun accent(c: Context): Int = p(c).getInt("accent", Color.parseColor("#00E676"))
     fun wall(c: Context): String? = p(c).getString("wall", null)
 
     fun setBg(c: Context, v: Int) { p(c).edit().putInt("bg", v).apply() }
@@ -25,6 +25,18 @@ object Prefs {
 
     fun hw(c: Context): Boolean = p(c).getBoolean("hw", true)
     fun setHw(c: Context, v: Boolean) { p(c).edit().putBoolean("hw", v).apply() }
+
+    fun seekSec(c: Context): Int = p(c).getInt("seek_sec", 10)
+    fun setSeekSec(c: Context, v: Int) { p(c).edit().putInt("seek_sec", v).apply() }
+
+    fun sortMode(c: Context): Int = p(c).getInt("sort_mode", 0)
+    fun setSortMode(c: Context, v: Int) { p(c).edit().putInt("sort_mode", v).apply() }
+
+    fun sortAsc(c: Context): Boolean = p(c).getBoolean("sort_asc", false)
+    fun setSortAsc(c: Context, v: Boolean) { p(c).edit().putBoolean("sort_asc", v).apply() }
+
+    fun gridView(c: Context): Boolean = p(c).getBoolean("grid_view", false)
+    fun setGridView(c: Context, v: Boolean) { p(c).edit().putBoolean("grid_view", v).apply() }
 
     fun bms(c: Context, key: String): List<Long> {
         val s = p(c).getString("bm_" + key, "") ?: ""
