@@ -784,3 +784,7 @@ class PlayerActivity : Activity() {
         }
     }
 }
+
+    private fun contrast(c: Int): Int {
+        return if (android.graphics.Color.luminance(c) > 0.5f) android.graphics.Color.BLACK else android.graphics.Color.WHITE
+    }
