@@ -2,6 +2,7 @@ package com.raj.rajplayer
 
 import android.Manifest
 import android.app.Activity
+import android.app.AlertDialog
 import android.content.ContentUris
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -12,7 +13,9 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.MediaStore
+import android.text.Editable
 import android.text.TextUtils
+import android.text.TextWatcher
 import android.util.LruCache
 import android.util.Size
 import android.view.Gravity
@@ -40,12 +43,15 @@ class MainActivity : Activity() {
     private val MP = ViewGroup.LayoutParams.MATCH_PARENT
     private val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     private lateinit var frame: FrameLayout
+    private lateinit var listHolder: FrameLayout
     private var videos: List<V> = emptyList()
     private var shown: List<V> = emptyList()
     private var inSettings = false
     private var asked = false
     private var tab = 0
     private var openFolder: String? = null
+    private var searchOn = false
+    private var query = ""
     private val cache = LruCache<String, Bitmap>(100)
     private val pool = Executors.newFixedThreadPool(3)
 
@@ -64,7 +70,7 @@ class MainActivity : Activity() {
         super.onResume()
         if (!hasPerm() && !asked) {
             asked = true
-            requestPermissions(arrayOf(perm()), 1)
+            reqPerms()
         }
         if (inSettings) showSettings() else showHome()
     }
@@ -116,6 +122,13 @@ class MainActivity : Activity() {
 
     private fun hasPerm() = checkSelfPermission(perm()) == PackageManager.PERMISSION_GRANTED
 
+    private fun reqPerms() {
+        val l = ArrayList<String>()
+        l.add(perm())
+        if (Build.VERSION.SDK_INT >= 33) l.add(Manifest.permission.POST_NOTIFICATIONS)
+        requestPermissions(l.toTypedArray(), 1)
+    }
+
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
     private fun contrast(c: Int) = if (Color.luminance(c) > 0.5f) Color.BLACK else Color.WHITE
@@ -143,7 +156,7 @@ class MainActivity : Activity() {
         v.text = t
         v.textSize = 22f
         v.setTextColor(color)
-        v.setPadding(dp(12), dp(8), dp(12), dp(8))
+        v.setPadding(dp(10), dp(8), dp(10), dp(8))
         v.setOnClickListener { f() }
         return v
     }
@@ -254,6 +267,24 @@ class MainActivity : Activity() {
         startActivityForResult(i, 3)
     }
 
+    private fun streamDialog() {
+        val et = EditText(this)
+        et.hint = "http://... ya rtsp://..."
+        AlertDialog.Builder(this)
+            .setTitle("Network stream URL")
+            .setView(et)
+            .setPositiveButton("Chalao") { _, _ ->
+                val u = et.text.toString().trim()
+                if (u.isNotEmpty()) {
+                    val i = Intent(this, PlayerActivity::class.java)
+                    i.data = Uri.parse(u)
+                    startActivity(i)
+                }
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     // ---------- list rows ----------
     private fun makeRow(): Pair<View, H> {
         val row = LinearLayout(this)
@@ -359,6 +390,12 @@ class MainActivity : Activity() {
         val head = LinearLayout(this)
         head.gravity = Gravity.CENTER_VERTICAL
         head.addView(label("RajPlayer", 24f, tc), LinearLayout.LayoutParams(0, WC, 1f))
+        head.addView(sym("\uD83D\uDD0D", tc) {
+            searchOn = !searchOn
+            if (!searchOn) query = ""
+            showHome()
+        })
+        head.addView(sym("\uD83C\uDF10", tc) { streamDialog() })
         head.addView(sym("\uD83D\uDCC2", tc) { openFile() })
         head.addView(sym("\u2699", tc) { showSettings() })
         root.addView(head)
@@ -376,46 +413,102 @@ class MainActivity : Activity() {
         }, LinearLayout.LayoutParams(0, WC, 1f))
         root.addView(tabs)
 
-        if (!hasPerm()) {
-            root.addView(label("Videos dikhane ke liye permission chahiye.", 16f, tc))
-            root.addView(button("Permission do", ac) { requestPermissions(arrayOf(perm()), 1) })
-        } else if (videos.isEmpty()) {
-            root.addView(label("Koi video nahi mila. Upar \uD83D\uDCC2 se file chuno.", 16f, tc))
-        } else {
-            val items = ArrayList<Item>()
-            val of = openFolder
-            if (tab == 0 || of != null) {
-                shown = if (of != null) videos.filter { it.folder == of } else videos
-                if (of != null) root.addView(label("\uD83D\uDCC1 " + folderName(of), 15f, tc))
-                for (v in shown) {
-                    items.add(Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), "V"))
+        if (searchOn) {
+            val se = EditText(this)
+            se.hint = "Video khojo..."
+            se.setTextColor(tc)
+            se.setHintTextColor(0x88FFFFFF.toInt())
+            se.setText(query)
+            se.addTextChangedListener(object : TextWatcher {
+                override fun afterTextChanged(s: Editable?) {
+                    query = s?.toString() ?: ""
+                    renderList()
                 }
-            } else {
-                val groups = videos.groupBy { it.folder }
-                val keys = groups.keys.sortedBy { folderName(it).lowercase() }
-                for (k in keys) {
-                    val l = groups[k] ?: continue
-                    items.add(Item(folderName(k), l.size.toString() + " videos", l[0].uri, l.size.toString(), "F:" + k))
-                }
-            }
-            val lv = ListView(this)
-            lv.divider = null
-            lv.adapter = makeAdapter(items, tc)
-            lv.setOnItemClickListener { _, _, i, _ ->
-                val chosen = items[i]
-                if (chosen.tag.startsWith("F:")) {
-                    openFolder = chosen.tag.substring(2)
-                    showHome()
-                } else {
-                    playList(shown, shown.indexOfFirst { it.uri == chosen.uri })
-                }
-            }
-            root.addView(lv, LinearLayout.LayoutParams(MP, MP))
+
+                override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
+                override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
+            })
+            root.addView(se)
         }
+
+        listHolder = FrameLayout(this)
+        root.addView(listHolder, LinearLayout.LayoutParams(MP, MP))
+        renderList()
         frame.addView(root, FrameLayout.LayoutParams(MP, MP))
     }
 
+    private fun renderList() {
+        val tc = Prefs.text(this)
+        val ac = Prefs.accent(this)
+        listHolder.removeAllViews()
+
+        if (!hasPerm()) {
+            val col = LinearLayout(this)
+            col.orientation = LinearLayout.VERTICAL
+            col.addView(label("Videos dikhane ke liye permission chahiye.", 16f, tc))
+            col.addView(button("Permission do", ac) { reqPerms() })
+            listHolder.addView(col)
+            return
+        }
+        if (videos.isEmpty()) {
+            listHolder.addView(label("Koi video nahi mila. Upar \uD83D\uDCC2 se file chuno.", 16f, tc))
+            return
+        }
+
+        val items = ArrayList<Item>()
+        val of = openFolder
+        val q = query.trim().lowercase()
+        if (q.isNotEmpty()) {
+            shown = videos.filter { it.name.lowercase().contains(q) }
+            for (v in shown) {
+                items.add(Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), "V"))
+            }
+        } else if (tab == 0 || of != null) {
+            shown = if (of != null) videos.filter { it.folder == of } else videos
+            for (v in shown) {
+                items.add(Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), "V"))
+            }
+        } else {
+            val groups = videos.groupBy { it.folder }
+            val keys = groups.keys.sortedBy { folderName(it).lowercase() }
+            for (k in keys) {
+                val l = groups[k] ?: continue
+                items.add(Item(folderName(k), l.size.toString() + " videos", l[0].uri, l.size.toString(), "F:" + k))
+            }
+        }
+
+        if (items.isEmpty()) {
+            listHolder.addView(label("Kuch nahi mila.", 16f, tc))
+            return
+        }
+
+        val col = LinearLayout(this)
+        col.orientation = LinearLayout.VERTICAL
+        if (of != null && q.isEmpty()) col.addView(label("\uD83D\uDCC1 " + folderName(of), 15f, tc))
+        val lv = ListView(this)
+        lv.divider = null
+        lv.adapter = makeAdapter(items, tc)
+        lv.setOnItemClickListener { _, _, i, _ ->
+            val chosen = items[i]
+            if (chosen.tag.startsWith("F:")) {
+                openFolder = chosen.tag.substring(2)
+                showHome()
+            } else {
+                playList(shown, shown.indexOfFirst { it.uri == chosen.uri })
+            }
+        }
+        col.addView(lv, LinearLayout.LayoutParams(MP, 0, 1f))
+        listHolder.addView(col, FrameLayout.LayoutParams(MP, MP))
+    }
+
     // ---------- Settings ----------
+    private fun applyPreset(bg: String, tx: String, ac: String) {
+        Prefs.setBg(this, Color.parseColor(bg))
+        Prefs.setText(this, Color.parseColor(tx))
+        Prefs.setAccent(this, Color.parseColor(ac))
+        showSettings()
+    }
+
     private fun colorRow(root: LinearLayout, title: String, set: (Int) -> Unit) {
         val tc = Prefs.text(this)
         val ac = Prefs.accent(this)
@@ -472,6 +565,17 @@ class MainActivity : Activity() {
         root.setPadding(dp(16), dp(40), dp(16), dp(24))
         root.addView(label("Settings", 26f, tc))
         root.addView(button("Wapas", ac) { showHome() })
+
+        root.addView(label("Ready themes", 16f, tc))
+        val ths = HorizontalScrollView(this)
+        val thr = LinearLayout(this)
+        thr.addView(button("Dark", ac) { applyPreset("#101418", "#FFFFFF", "#00C853") })
+        thr.addView(button("AMOLED", ac) { applyPreset("#000000", "#FFFFFF", "#00E5FF") })
+        thr.addView(button("Blue", ac) { applyPreset("#0D1B2A", "#E0E1DD", "#2196F3") })
+        thr.addView(button("Purple", ac) { applyPreset("#1B1030", "#FFFFFF", "#B388FF") })
+        thr.addView(button("Light", ac) { applyPreset("#FAFAFA", "#111111", "#1976D2") })
+        ths.addView(thr)
+        root.addView(ths)
 
         colorRow(root, "Background rang") { Prefs.setBg(this, it) }
         colorRow(root, "Text rang") { Prefs.setText(this, it) }

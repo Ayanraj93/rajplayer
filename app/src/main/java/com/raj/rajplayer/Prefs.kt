@@ -22,4 +22,19 @@ object Prefs {
         if (v <= 0L) e.remove("pos_" + key) else e.putLong("pos_" + key, v)
         e.apply()
     }
+
+    fun hw(c: Context): Boolean = p(c).getBoolean("hw", true)
+    fun setHw(c: Context, v: Boolean) { p(c).edit().putBoolean("hw", v).apply() }
+
+    fun bms(c: Context, key: String): List<Long> {
+        val s = p(c).getString("bm_" + key, "") ?: ""
+        if (s.isEmpty()) return emptyList()
+        return s.split(",").mapNotNull { it.toLongOrNull() }
+    }
+
+    fun setBms(c: Context, key: String, v: List<Long>) {
+        val e = p(c).edit()
+        if (v.isEmpty()) e.remove("bm_" + key) else e.putString("bm_" + key, v.joinToString(","))
+        e.apply()
+    }
 }

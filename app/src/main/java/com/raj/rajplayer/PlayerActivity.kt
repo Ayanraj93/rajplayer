@@ -2,6 +2,8 @@ package com.raj.rajplayer
 
 import android.app.Activity
 import android.app.AlertDialog
+import android.app.PictureInPictureParams
+import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.ColorStateList
 import android.content.res.Configuration
@@ -16,6 +18,7 @@ import android.os.Looper
 import android.os.ParcelFileDescriptor
 import android.provider.OpenableColumns
 import android.text.TextUtils
+import android.util.Rational
 import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
@@ -27,6 +30,7 @@ import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import java.io.File
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
@@ -50,8 +54,6 @@ class PlayerActivity : Activity() {
     private lateinit var curTv: TextView
     private lateinit var durTv: TextView
     private lateinit var playBtn: TextView
-    private lateinit var speedBtn: TextView
-    private lateinit var fitBtn: TextView
     private lateinit var audioMgr: AudioManager
 
     private var pfd: ParcelFileDescriptor? = null
@@ -63,6 +65,10 @@ class PlayerActivity : Activity() {
     private var ended = false
     private var userSeeking = false
     private var resumeTo = 0L
+    private var bgAudio = false
+    private var videoPortrait = false
+    private var abA = -1L
+    private var abB = -1L
 
     private var gMode = 0
     private var seekTarget = 0L
@@ -84,6 +90,11 @@ class PlayerActivity : Activity() {
 
     private val hideRun = Runnable { hideControls() }
     private val hideMsg = Runnable { msgTv.visibility = View.GONE }
+    private val sleepRun = Runnable {
+        if (mp.isPlaying) mp.pause()
+        saveProgress()
+        showMsg("Sleep timer: video roka")
+    }
 
     private val tick = object : Runnable {
         override fun run() {
@@ -100,6 +111,7 @@ class PlayerActivity : Activity() {
                 }
                 durTv.text = fmt(len)
             }
+            if (abA >= 0 && abB > abA && t >= abB) mp.setTime(abA)
             if (!userSeeking) curTv.text = fmt(t)
             playBtn.text = if (mp.isPlaying) "\u275A\u275A" else "\u25B6"
             ui.postDelayed(this, 500)
@@ -147,7 +159,7 @@ class PlayerActivity : Activity() {
         msgTv.text = s
         msgTv.visibility = View.VISIBLE
         ui.removeCallbacks(hideMsg)
-        ui.postDelayed(hideMsg, 800)
+        ui.postDelayed(hideMsg, 900)
     }
 
     private fun showControls() {
@@ -185,6 +197,7 @@ class PlayerActivity : Activity() {
 
     private fun applyOrientation(uri: Uri) {
         var o = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        videoPortrait = false
         try {
             if (uri.scheme == "content" || uri.scheme == "file") {
                 val r = MediaMetadataRetriever()
@@ -199,6 +212,7 @@ class PlayerActivity : Activity() {
                     o = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
                 } else if (dh > dw) {
                     o = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                    videoPortrait = true
                 }
             }
         } catch (e: Exception) {
@@ -217,6 +231,8 @@ class PlayerActivity : Activity() {
     private fun loadAt(i: Int) {
         saveProgress()
         idx = i
+        abA = -1L
+        abB = -1L
         val uri = items[i]
         titleTv.text = nameOf(uri)
         resumeTo = Prefs.pos(this, uri.toString())
@@ -231,7 +247,7 @@ class PlayerActivity : Activity() {
                 pfd = null
                 media = Media(vlc, uri)
             }
-            media.setHWDecoderEnabled(true, false)
+            media.setHWDecoderEnabled(Prefs.hw(this), false)
             mp.setMedia(media)
             media.release()
             mp.play()
@@ -286,6 +302,194 @@ class PlayerActivity : Activity() {
         gMode = 0
         ui.removeCallbacks(hideMsg)
         ui.postDelayed(hideMsg, 600)
+    }
+
+    // ---------- premium features ----------
+    private fun showMenu() {
+        val abLabel = if (abA < 0) "A-B repeat: A set karo"
+        else if (abB < 0) "A-B repeat: B set karo"
+        else "A-B repeat band karo"
+        val opts = arrayOf(
+            "Equalizer",
+            "Audio boost",
+            "Sleep timer",
+            "Subtitle file kholo",
+            "Bookmark lagao",
+            "Bookmarks dekho",
+            abLabel,
+            "Background audio: " + (if (bgAudio) "ON" else "OFF"),
+            "HW decoder: " + (if (Prefs.hw(this)) "ON" else "OFF"),
+            "PiP (chhoti window)"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("More")
+            .setItems(opts) { _, i ->
+                when (i) {
+                    0 -> eqDialog()
+                    1 -> boostDialog()
+                    2 -> sleepDialog()
+                    3 -> pickSub()
+                    4 -> addBookmark()
+                    5 -> bookmarksDialog()
+                    6 -> abStep()
+                    7 -> {
+                        bgAudio = !bgAudio
+                        showMsg("Background audio " + (if (bgAudio) "ON" else "OFF"))
+                    }
+                    8 -> {
+                        Prefs.setHw(this, !Prefs.hw(this))
+                        loadAt(idx)
+                        showMsg("HW decoder " + (if (Prefs.hw(this)) "ON" else "OFF"))
+                    }
+                    9 -> enterPip()
+                    else -> {}
+                }
+            }
+            .show()
+    }
+
+    private fun eqDialog() {
+        val n = MediaPlayer.Equalizer.getPresetCount()
+        val names = ArrayList<String>()
+        names.add("Off")
+        for (k in 0 until n) names.add(MediaPlayer.Equalizer.getPresetName(k))
+        AlertDialog.Builder(this)
+            .setTitle("Equalizer")
+            .setItems(names.toTypedArray()) { _, i ->
+                if (i == 0) mp.setEqualizer(null)
+                else mp.setEqualizer(MediaPlayer.Equalizer.createFromPreset(i - 1))
+                showMsg("Equalizer: " + names[i])
+            }
+            .show()
+    }
+
+    private fun boostDialog() {
+        val vals = intArrayOf(100, 125, 150, 175, 200)
+        val names = arrayOf("100% (normal)", "125%", "150%", "175%", "200% (max)")
+        AlertDialog.Builder(this)
+            .setTitle("Audio boost")
+            .setItems(names) { _, i ->
+                mp.setVolume(vals[i])
+                showMsg("Audio boost " + vals[i] + "%")
+            }
+            .show()
+    }
+
+    private fun sleepDialog() {
+        val mins = intArrayOf(0, 15, 30, 45, 60)
+        val names = arrayOf("Off", "15 min", "30 min", "45 min", "60 min")
+        AlertDialog.Builder(this)
+            .setTitle("Sleep timer")
+            .setItems(names) { _, i ->
+                ui.removeCallbacks(sleepRun)
+                if (mins[i] > 0) {
+                    ui.postDelayed(sleepRun, mins[i] * 60000L)
+                    showMsg("Sleep timer: " + names[i])
+                } else {
+                    showMsg("Sleep timer off")
+                }
+            }
+            .show()
+    }
+
+    private fun pickSub() {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT)
+        i.addCategory(Intent.CATEGORY_OPENABLE)
+        i.type = "*/*"
+        startActivityForResult(i, 7)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != 7 || resultCode != RESULT_OK) return
+        val u = data?.data ?: return
+        try {
+            val nm = nameOf(u)
+            val ext = nm.substringAfterLast('.', "srt")
+            val f = File(cacheDir, "sub_" + System.currentTimeMillis() + "." + ext)
+            contentResolver.openInputStream(u)?.use { ins ->
+                f.outputStream().use { out -> ins.copyTo(out) }
+            }
+            mp.addSlave(0, Uri.fromFile(f), true)
+            showMsg("Subtitle lag gaya")
+        } catch (e: Exception) {
+            Toast.makeText(this, "Subtitle nahi laga: " + e.message, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun addBookmark() {
+        val key = items[idx].toString()
+        val t = mp.getTime()
+        Prefs.setBms(this, key, (Prefs.bms(this, key) + t).sorted())
+        showMsg("Bookmark: " + fmt(t))
+    }
+
+    private fun bookmarksDialog() {
+        val key = items[idx].toString()
+        val l = Prefs.bms(this, key)
+        if (l.isEmpty()) {
+            Toast.makeText(this, "Koi bookmark nahi hai", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val names = l.map { fmt(it) }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Bookmarks")
+            .setItems(names) { _, i ->
+                mp.setTime(l[i])
+                showControls()
+            }
+            .setNeutralButton("Sab hatao") { _, _ -> Prefs.setBms(this, key, emptyList()) }
+            .show()
+    }
+
+    private fun abStep() {
+        if (abA < 0) {
+            abA = mp.getTime()
+            showMsg("A: " + fmt(abA))
+        } else if (abB < 0) {
+            val t = mp.getTime()
+            if (t > abA) {
+                abB = t
+                showMsg("B: " + fmt(abB) + " (loop chalu)")
+            } else {
+                showMsg("B, A ke baad hona chahiye")
+            }
+        } else {
+            abA = -1L
+            abB = -1L
+            showMsg("A-B repeat band")
+        }
+    }
+
+    private fun enterPip() {
+        if (locked) return
+        try {
+            val b = PictureInPictureParams.Builder()
+                .setAspectRatio(if (videoPortrait) Rational(9, 16) else Rational(16, 9))
+            enterPictureInPictureMode(b.build())
+        } catch (e: Exception) {
+            Toast.makeText(this, "PiP nahi chal paya", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (::mp.isInitialized && mp.isPlaying && !locked && !bgAudio) enterPip()
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        if (isInPictureInPictureMode) hideControls() else showControls()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (locked) {
+            showMsg("Locked: unlock ke liye \uD83D\uDD12 ko dabaye rakho")
+            return
+        }
+        super.onBackPressed()
     }
 
     // ---------- onCreate ----------
@@ -404,42 +608,49 @@ class PlayerActivity : Activity() {
 
         val exRow = LinearLayout(this)
         exRow.gravity = Gravity.CENTER
-        speedBtn = ib("1x", 15f) { b ->
+        exRow.addView(ib("1x", 15f) { b ->
             speedIdx = (speedIdx + 1) % speeds.size
             mp.setRate(speeds[speedIdx])
             b.text = speeds[speedIdx].toString() + "x"
             showControls()
-        }
-        fitBtn = ib("Fit", 15f) { b ->
+        })
+        exRow.addView(ib("Fit", 15f) { b ->
             scaleIdx = (scaleIdx + 1) % scales.size
             mp.setVideoScale(scales[scaleIdx])
             b.text = scaleNames[scaleIdx]
             showControls()
-        }
-        exRow.addView(speedBtn)
-        exRow.addView(fitBtn)
+        })
         exRow.addView(ib("Audio", 15f) {
             pickTrack("Audio track", mp.getAudioTracks()) { id -> mp.setAudioTrack(id) }
         })
         exRow.addView(ib("Sub", 15f) {
             pickTrack("Subtitle", mp.getSpuTracks()) { id -> mp.setSpuTrack(id) }
         })
+        exRow.addView(ib("\u22EF", 22f) { showMenu() })
         controls.addView(exRow)
         root.addView(controls, FrameLayout.LayoutParams(MP, WC, Gravity.BOTTOM))
 
-        lockBtn = ib("\uD83D\uDD12", 24f) {
-            locked = !locked
+        // ---- kids lock ----
+        lockBtn = ib("\uD83D\uDD13", 24f) { b ->
             if (locked) {
+                showMsg("Unlock ke liye icon ko dabaye rakho")
+            } else {
+                locked = true
+                b.text = "\uD83D\uDD12"
                 topBar.visibility = View.GONE
                 controls.visibility = View.GONE
-                it.setTag("x")
-                (it as TextView).text = "\uD83D\uDD13"
-                showMsg("Screen lock")
-            } else {
-                (it as TextView).text = "\uD83D\uDD12"
-                showMsg("Unlock")
+                showMsg("Locked (kids lock)")
             }
             showControls()
+        }
+        lockBtn.setOnLongClickListener {
+            if (locked) {
+                locked = false
+                lockBtn.text = "\uD83D\uDD13"
+                showMsg("Unlock")
+                showControls()
+            }
+            true
         }
         val llp = FrameLayout.LayoutParams(WC, WC, Gravity.START or Gravity.CENTER_VERTICAL)
         llp.setMargins(dp(24), 0, 0, 0)
@@ -521,15 +732,33 @@ class PlayerActivity : Activity() {
         ui.post(tick)
     }
 
+    override fun onResume() {
+        super.onResume()
+        stopService(Intent(this, PlaybackService::class.java))
+    }
+
     override fun onPause() {
         super.onPause()
         saveProgress()
-        if (::mp.isInitialized && mp.isPlaying) mp.pause()
+        if (::mp.isInitialized && bgAudio && mp.isPlaying) {
+            try {
+                startForegroundService(
+                    Intent(this, PlaybackService::class.java).putExtra("title", titleTv.text.toString())
+                )
+            } catch (e: Exception) {
+            }
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (::mp.isInitialized && !bgAudio && mp.isPlaying) mp.pause()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         ui.removeCallbacksAndMessages(null)
+        stopService(Intent(this, PlaybackService::class.java))
         if (::mp.isInitialized) {
             mp.stop()
             mp.detachViews()

@@ -11,9 +11,9 @@ android {
         applicationId = "com.raj.rajplayer"
         minSdk = 29
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.1"
-        ndk { abiFilters.add("arm64-v8a") }
+        versionCode = 3
+        versionName = "1.2"
+        ndk { abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a")) }
     }
 
     signingConfigs {
