@@ -45,10 +45,11 @@ class MainActivity : Activity() {
     private lateinit var frame: FrameLayout
     private lateinit var listHolder: FrameLayout
     private var videos: List<V> = emptyList()
+    private var audios: List<V> = emptyList()
     private var shown: List<V> = emptyList()
     private var inSettings = false
     private var asked = false
-    private var tab = 0 // 0:Videos, 1:Folders, 2:Playlist
+    private var tab = 0 
     private var openFolder: String? = null
     private var searchOn = false
     private var query = ""
@@ -119,11 +120,16 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_VIDEO
         else Manifest.permission.READ_EXTERNAL_STORAGE
 
-    private fun hasPerm() = checkSelfPermission(perm()) == PackageManager.PERMISSION_GRANTED
+    private fun audioPerm(): String =
+        if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO
+        else Manifest.permission.READ_EXTERNAL_STORAGE
+
+    private fun hasPerm() = checkSelfPermission(perm()) == PackageManager.PERMISSION_GRANTED && checkSelfPermission(audioPerm()) == PackageManager.PERMISSION_GRANTED
 
     private fun reqPerms() {
         val l = ArrayList<String>()
         l.add(perm())
+        l.add(audioPerm())
         if (Build.VERSION.SDK_INT >= 33) l.add(Manifest.permission.POST_NOTIFICATIONS)
         requestPermissions(l.toTypedArray(), 1)
     }
@@ -163,9 +169,9 @@ class MainActivity : Activity() {
     private fun tabBtn(t: String, sel: Boolean, ac: Int, tc: Int, f: () -> Unit): TextView {
         val v = TextView(this)
         v.text = t
-        v.textSize = 14f
+        v.textSize = 13f
         v.gravity = Gravity.CENTER
-        v.setPadding(0, dp(10), 0, dp(10))
+        v.setPadding(dp(6), dp(8), dp(6), dp(8))
         if (sel) {
             val gd = GradientDrawable()
             gd.setColor(ac)
@@ -211,10 +217,10 @@ class MainActivity : Activity() {
         return if (s.isEmpty()) "Internal Storage" else s
     }
 
-    private fun loadVideos() {
-        val list = ArrayList<V>()
-        val base = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-        val proj = arrayOf(
+    private fun loadMedia() {
+        val vList = ArrayList<V>()
+        val vBase = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
+        val vProj = arrayOf(
             MediaStore.Video.Media._ID,
             MediaStore.Video.Media.DISPLAY_NAME,
             MediaStore.Video.Media.DURATION,
@@ -223,7 +229,7 @@ class MainActivity : Activity() {
             MediaStore.Video.Media.DATE_ADDED
         )
         try {
-            contentResolver.query(base, proj, null, null, null)?.use { c ->
+            contentResolver.query(vBase, vProj, null, null, null)?.use { c ->
                 val idc = c.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
                 val nc = c.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
                 val dc = c.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
@@ -231,10 +237,10 @@ class MainActivity : Activity() {
                 val rc = c.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
                 val dac = c.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
                 while (c.moveToNext()) {
-                    list.add(
+                    vList.add(
                         V(
                             c.getString(nc) ?: "video",
-                            ContentUris.withAppendedId(base, c.getLong(idc)),
+                            ContentUris.withAppendedId(vBase, c.getLong(idc)),
                             c.getLong(dc), c.getLong(sc), c.getString(rc) ?: "",
                             c.getLong(dac)
                         )
@@ -242,9 +248,41 @@ class MainActivity : Activity() {
                 }
             }
         } catch (e: Exception) {
-            toast("Videos load nahi hue")
         }
-        videos = sortList(list)
+        videos = sortList(vList)
+
+        val aList = ArrayList<V>()
+        val aBase = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        val aProj = arrayOf(
+            MediaStore.Audio.Media._ID,
+            MediaStore.Audio.Media.DISPLAY_NAME,
+            MediaStore.Audio.Media.DURATION,
+            MediaStore.Audio.Media.SIZE,
+            MediaStore.MediaColumns.RELATIVE_PATH,
+            MediaStore.Audio.Media.DATE_ADDED
+        )
+        try {
+            contentResolver.query(aBase, aProj, MediaStore.Audio.Media.IS_MUSIC + "!= 0", null, null)?.use { c ->
+                val idc = c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
+                val nc = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
+                val dc = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
+                val sc = c.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
+                val rc = c.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+                val dac = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+                while (c.moveToNext()) {
+                    aList.add(
+                        V(
+                            c.getString(nc) ?: "audio",
+                            ContentUris.withAppendedId(aBase, c.getLong(idc)),
+                            c.getLong(dc), c.getLong(sc), c.getString(rc) ?: "",
+                            c.getLong(dac)
+                        )
+                    )
+                }
+            }
+        } catch (e: Exception) {
+        }
+        audios = sortList(aList)
     }
 
     private fun sortList(l: List<V>): List<V> {
@@ -303,8 +341,8 @@ class MainActivity : Activity() {
     }
 
     private fun sortDialog() {
-        val modes = arrayOf("Date Added", "File Name", "File Size", "Video Length")
-        val orders = arrayOf("New to Old (Descending)", "Old to New (Ascending)")
+        val modes = arrayOf("Date Added", "File Name", "File Size", "Length")
+        val orders = arrayOf("New to Old", "Old to New")
         var mIdx = Prefs.sortMode(this)
         var aIdx = if (Prefs.sortAsc(this)) 1 else 0
 
@@ -453,7 +491,7 @@ class MainActivity : Activity() {
 
     private fun showHome() {
         inSettings = false
-        if (hasPerm()) loadVideos()
+        if (hasPerm()) loadMedia()
         val tc = Prefs.text(this)
         val ac = Prefs.accent(this)
         frame.removeAllViews()
@@ -494,8 +532,11 @@ class MainActivity : Activity() {
         tabs.addView(tabBtn("Folders", tab == 1, ac, tc) {
             tab = 1; openFolder = null; showHome()
         }, LinearLayout.LayoutParams(0, WC, 1f))
-        tabs.addView(tabBtn("Playlist", tab == 2, ac, tc) {
+        tabs.addView(tabBtn("Music", tab == 2, ac, tc) {
             tab = 2; openFolder = null; showHome()
+        }, LinearLayout.LayoutParams(0, WC, 1f))
+        tabs.addView(tabBtn("Playlist", tab == 3, ac, tc) {
+            tab = 3; openFolder = null; showHome()
         }, LinearLayout.LayoutParams(0, WC, 1f))
         navRow.addView(tabs, LinearLayout.LayoutParams(0, WC, 1f))
 
@@ -508,7 +549,7 @@ class MainActivity : Activity() {
 
         if (searchOn) {
             val se = EditText(this)
-            se.hint = "Search videos instantly..."
+            se.hint = "Search media..."
             se.setTextColor(tc)
             se.setHintTextColor(0x77FFFFFF.toInt())
             se.setText(query)
@@ -538,13 +579,9 @@ class MainActivity : Activity() {
             val col = LinearLayout(this)
             col.orientation = LinearLayout.VERTICAL
             col.setPadding(dp(16), dp(24), dp(16), 0)
-            col.addView(label("Storage permission is required to list media files.", 16f, tc))
+            col.addView(label("Storage permissions are required.", 16f, tc))
             col.addView(button("Grant Permission", ac) { reqPerms() })
             listHolder.addView(col)
-            return
-        }
-        if (videos.isEmpty()) {
-            listHolder.addView(label("No media files found. Use folder or file picker above.", 15f, tc))
             return
         }
 
@@ -552,15 +589,23 @@ class MainActivity : Activity() {
         val of = openFolder
         val q = query.trim().lowercase()
 
+        val activeList = if (tab == 2) audios else videos
+
         if (q.isNotEmpty()) {
-            shown = videos.filter { it.name.lowercase().contains(q) }
+            shown = activeList.filter { it.name.lowercase().contains(q) }
             for (v in shown) {
                 items.add(Item(v.name, folderName(v.folder) + " • " + sizeStr(v.size), v.uri, durStr(v.dur), "V"))
             }
-        } else if (tab == 2) {
-            shown = videos
+        } else if (tab == 3) {
+            val favSet = Prefs.favs(this)
+            shown = videos.filter { favSet.contains(it.uri.toString()) } + audios.filter { favSet.contains(it.uri.toString()) }
             for (v in shown) {
-                items.add(Item(v.name, folderName(v.folder) + " • " + sizeStr(v.size), v.uri, durStr(v.dur), "V"))
+                items.add(Item(v.name, folderName(v.folder) + " • " + sizeStr(v.size), v.uri, durStr(v.dur), "⭐"))
+            }
+        } else if (tab == 2) {
+            shown = audios
+            for (v in shown) {
+                items.add(Item(v.name, folderName(v.folder) + " • " + sizeStr(v.size), v.uri, durStr(v.dur), "🎵"))
             }
         } else if (tab == 0 || of != null) {
             shown = if (of != null) videos.filter { it.folder == of } else videos
@@ -577,7 +622,8 @@ class MainActivity : Activity() {
         }
 
         if (items.isEmpty()) {
-            listHolder.addView(label("No items found.", 15f, tc))
+            val emptyMsg = if (tab == 3) "No favorite items in Playlist yet! Long press any item to add." else "No items found."
+            listHolder.addView(label(emptyMsg, 15f, tc))
             return
         }
 
@@ -596,6 +642,16 @@ class MainActivity : Activity() {
             } else {
                 playList(shown, shown.indexOfFirst { it.uri == chosen.uri })
             }
+        }
+        lv.onItemLongClickListener = android.widget.AdapterView.OnItemLongClickListener { _, _, i, _ ->
+            val chosen = items[i]
+            val u = chosen.uri
+            if (u != null) {
+                val isNowFav = Prefs.toggleFav(this@MainActivity, u.toString())
+                if (isNowFav) toast("Added to Playlist ⭐") else toast("Removed from Playlist")
+                showHome()
+            }
+            true
         }
         col.addView(lv, LinearLayout.LayoutParams(MP, 0, 1f))
         listHolder.addView(col, FrameLayout.LayoutParams(MP, MP))

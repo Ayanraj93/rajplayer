@@ -38,6 +38,23 @@ object Prefs {
     fun gridView(c: Context): Boolean = p(c).getBoolean("grid_view", false)
     fun setGridView(c: Context, v: Boolean) { p(c).edit().putBoolean("grid_view", v).apply() }
 
+    fun favs(c: Context): Set<String> {
+        return p(c).getStringSet("fav_uris", emptySet()) ?: emptySet()
+    }
+    fun toggleFav(c: Context, uriStr: String): Boolean {
+        val set = favs(c).toMutableSet()
+        val added = if (set.contains(uriStr)) {
+            set.remove(uriStr)
+            false
+        } else {
+            set.add(uriStr)
+            true
+        }
+        p(c).edit().putStringSet("fav_uris", set).apply()
+        return added
+    }
+    fun isFav(c: Context, uriStr: String): Boolean = favs(c).contains(uriStr)
+
     fun bms(c: Context, key: String): List<Long> {
         val s = p(c).getString("bm_" + key, "") ?: ""
         if (s.isEmpty()) return emptyList()

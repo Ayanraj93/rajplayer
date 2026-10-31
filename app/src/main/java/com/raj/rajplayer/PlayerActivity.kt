@@ -123,6 +123,8 @@ class PlayerActivity : Activity() {
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
+    private fun contrast(c: Int) = if (Color.luminance(c) > 0.5f) Color.BLACK else Color.WHITE
+
     private fun fmt(ms: Long): String {
         val s = if (ms < 0) 0 else ms / 1000
         val hh = s / 3600
@@ -194,7 +196,7 @@ class PlayerActivity : Activity() {
             }
         } catch (e: Exception) {
         }
-        return u.lastPathSegment ?: "Video"
+        return u.lastPathSegment ?: "Media"
     }
 
     private fun applyOrientation(uri: Uri) {
@@ -430,7 +432,7 @@ class PlayerActivity : Activity() {
         val key = items[idx].toString()
         val l = Prefs.bms(this, key)
         if (l.isEmpty()) {
-            Toast.makeText(this, "No bookmarks saved for this video", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "No bookmarks saved for this media", Toast.LENGTH_SHORT).show()
             return
         }
         val names = l.map { fmt(it) }.toTypedArray()
@@ -589,7 +591,7 @@ class PlayerActivity : Activity() {
         val trRow = LinearLayout(this)
         trRow.gravity = Gravity.CENTER
         trRow.addView(ib("⏮", 22f) {
-            if (idx > 0) loadAt(idx - 1) else Toast.makeText(this, "First video", Toast.LENGTH_SHORT).show()
+            if (idx > 0) loadAt(idx - 1) else Toast.makeText(this, "First item", Toast.LENGTH_SHORT).show()
         })
         trRow.addView(ib("-${Prefs.seekSec(this)}s", 15f) { seekBy((-Prefs.seekSec(this) * 1000).toLong()); showControls() })
         playBtn = ib("⏸", 24f) { togglePlay() }
@@ -603,7 +605,7 @@ class PlayerActivity : Activity() {
         trRow.addView(playBtn, plp)
         trRow.addView(ib("+${Prefs.seekSec(this)}s", 15f) { seekBy((Prefs.seekSec(this) * 1000).toLong()); showControls() })
         trRow.addView(ib("⏭", 22f) {
-            if (idx + 1 < items.size) loadAt(idx + 1) else Toast.makeText(this, "Last video", Toast.LENGTH_SHORT).show()
+            if (idx + 1 < items.size) loadAt(idx + 1) else Toast.makeText(this, "Last item", Toast.LENGTH_SHORT).show()
         })
         controls.addView(trRow)
 
@@ -640,7 +642,7 @@ class PlayerActivity : Activity() {
                 b.text = "🔒"
                 topBar.visibility = View.GONE
                 controls.visibility = View.GONE
-                showMsg("Screen Locked (Kids Lock)")
+                showMsg("Screen Locked")
             }
             showControls()
         }
@@ -784,7 +786,3 @@ class PlayerActivity : Activity() {
         }
     }
 }
-
-    private fun contrast(c: Int): Int {
-        return if (android.graphics.Color.luminance(c) > 0.5f) android.graphics.Color.BLACK else android.graphics.Color.WHITE
-    }
