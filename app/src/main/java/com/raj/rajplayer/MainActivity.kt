@@ -124,7 +124,13 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO
         else Manifest.permission.READ_EXTERNAL_STORAGE
 
-    private fun hasPerm() = checkSelfPermission(perm()) == PackageManager.PERMISSION_GRANTED && checkSelfPermission(audioPerm()) == PackageManager.PERMISSION_GRANTED
+    private fun hasPerm() = checkSelfPermission(perm()) == PackageManager.PERMISSION_GRANTED || checkSelfPermission(audioPerm()) == PackageManager.PERMISSION_GRANTED
+
+    private fun openAppSettings() {
+        val i = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+        i.data = Uri.fromParts("package", packageName, null)
+        startActivity(i)
+    }
 
     private fun reqPerms() {
         val l = ArrayList<String>()
@@ -581,6 +587,8 @@ class MainActivity : Activity() {
             col.setPadding(dp(16), dp(24), dp(16), 0)
             col.addView(label("Storage permissions are required.", 16f, tc))
             col.addView(button("Grant Permission", ac) { reqPerms() })
+            col.addView(button("App settings kholo", ac) { openAppSettings() })
+            col.addView(label("Settings > Permissions me 'Music and audio' aur 'Photos and videos' ko Allow (all) karo, phir wapas aao.", 13f, tc))
             listHolder.addView(col)
             return
         }
