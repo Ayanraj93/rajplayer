@@ -22,6 +22,7 @@ import android.util.Rational
 import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
+import android.view.ScaleGestureDetector
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -54,6 +55,7 @@ class PlayerActivity : Activity() {
     private lateinit var curTv: TextView
     private lateinit var durTv: TextView
     private lateinit var playBtn: TextView
+    private lateinit var fitBtn: TextView
     private lateinit var audioMgr: AudioManager
 
     private var pfd: ParcelFileDescriptor? = null
@@ -74,8 +76,9 @@ class PlayerActivity : Activity() {
     private var seekTarget = 0L
     private var brightCur = 0.5f
     private var volCur = 0.5f
+    private var videoScaleFactor = 1.0f
 
-    private val speeds = floatArrayOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f)
+    private val speeds = floatArrayOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 2.5f, 3.0f)
     private var speedIdx = 2
     private val scales = listOf(
         MediaPlayer.ScaleType.SURFACE_BEST_FIT,
@@ -93,7 +96,7 @@ class PlayerActivity : Activity() {
     private val sleepRun = Runnable {
         if (mp.isPlaying) mp.pause()
         saveProgress()
-        showMsg("Sleep timer: video roka")
+        showMsg("Sleep Timer: Playback Paused")
     }
 
     private val tick = object : Runnable {
@@ -113,12 +116,11 @@ class PlayerActivity : Activity() {
             }
             if (abA >= 0 && abB > abA && t >= abB) mp.setTime(abA)
             if (!userSeeking) curTv.text = fmt(t)
-            playBtn.text = if (mp.isPlaying) "\u275A\u275A" else "\u25B6"
+            playBtn.text = if (mp.isPlaying) "⏸" else "▶"
             ui.postDelayed(this, 500)
         }
     }
 
-    // ---------- helpers ----------
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun fmt(ms: Long): String {
@@ -253,7 +255,7 @@ class PlayerActivity : Activity() {
             mp.play()
             ended = false
         } catch (e: Exception) {
-            Toast.makeText(this, "File nahi khuli: " + e.message, Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Failed to open file: " + e.message, Toast.LENGTH_LONG).show()
         }
         try {
             oldPfd?.close()
@@ -287,7 +289,7 @@ class PlayerActivity : Activity() {
 
     private fun pickTrack(title: String, tracks: Array<MediaPlayer.TrackDescription>?, set: (Int) -> Unit) {
         if (tracks == null || tracks.isEmpty()) {
-            Toast.makeText(this, "Koi track nahi mila", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "No tracks available", Toast.LENGTH_SHORT).show()
             return
         }
         val names = tracks.map { it.name ?: ("Track " + it.id) }.toTypedArray()
@@ -304,25 +306,24 @@ class PlayerActivity : Activity() {
         ui.postDelayed(hideMsg, 600)
     }
 
-    // ---------- premium features ----------
     private fun showMenu() {
-        val abLabel = if (abA < 0) "A-B repeat: A set karo"
-        else if (abB < 0) "A-B repeat: B set karo"
-        else "A-B repeat band karo"
+        val abLabel = if (abA < 0) "A-B Repeat: Set Point A"
+        else if (abB < 0) "A-B Repeat: Set Point B"
+        else "Disable A-B Repeat"
         val opts = arrayOf(
-            "Equalizer",
-            "Audio boost",
-            "Sleep timer",
-            "Subtitle file kholo",
-            "Bookmark lagao",
-            "Bookmarks dekho",
+            "🎚️ Equalizer Presets",
+            "🔊 Audio Boost (Up to 200%)",
+            "⏱️ Sleep Timer",
+            "📂 Load External Subtitle",
+            "🔖 Add Bookmark",
+            "📑 View Bookmarks",
             abLabel,
-            "Background audio: " + (if (bgAudio) "ON" else "OFF"),
-            "HW decoder: " + (if (Prefs.hw(this)) "ON" else "OFF"),
-            "PiP (chhoti window)"
+            "🎵 Background Audio: " + (if (bgAudio) "ON" else "OFF"),
+            "⚡ Hardware Decoder: " + (if (Prefs.hw(this)) "ON" else "OFF"),
+            "🔲 Picture-in-Picture (PiP)"
         )
         AlertDialog.Builder(this)
-            .setTitle("More")
+            .setTitle("⚡ Ultra Options")
             .setItems(opts) { _, i ->
                 when (i) {
                     0 -> eqDialog()
@@ -334,12 +335,12 @@ class PlayerActivity : Activity() {
                     6 -> abStep()
                     7 -> {
                         bgAudio = !bgAudio
-                        showMsg("Background audio " + (if (bgAudio) "ON" else "OFF"))
+                        showMsg("Background Audio " + (if (bgAudio) "ON" else "OFF"))
                     }
                     8 -> {
                         Prefs.setHw(this, !Prefs.hw(this))
                         loadAt(idx)
-                        showMsg("HW decoder " + (if (Prefs.hw(this)) "ON" else "OFF"))
+                        showMsg("HW Decoder " + (if (Prefs.hw(this)) "ON" else "OFF"))
                     }
                     9 -> enterPip()
                     else -> {}
@@ -351,10 +352,10 @@ class PlayerActivity : Activity() {
     private fun eqDialog() {
         val n = MediaPlayer.Equalizer.getPresetCount()
         val names = ArrayList<String>()
-        names.add("Off")
+        names.add("Normal / Off")
         for (k in 0 until n) names.add(MediaPlayer.Equalizer.getPresetName(k))
         AlertDialog.Builder(this)
-            .setTitle("Equalizer")
+            .setTitle("Equalizer Presets")
             .setItems(names.toTypedArray()) { _, i ->
                 if (i == 0) mp.setEqualizer(null)
                 else mp.setEqualizer(MediaPlayer.Equalizer.createFromPreset(i - 1))
@@ -365,28 +366,28 @@ class PlayerActivity : Activity() {
 
     private fun boostDialog() {
         val vals = intArrayOf(100, 125, 150, 175, 200)
-        val names = arrayOf("100% (normal)", "125%", "150%", "175%", "200% (max)")
+        val names = arrayOf("100% (Normal)", "125%", "150%", "175%", "200% (Max Boost)")
         AlertDialog.Builder(this)
-            .setTitle("Audio boost")
+            .setTitle("Audio Volume Boost")
             .setItems(names) { _, i ->
                 mp.setVolume(vals[i])
-                showMsg("Audio boost " + vals[i] + "%")
+                showMsg("Audio Boost set to " + vals[i] + "%")
             }
             .show()
     }
 
     private fun sleepDialog() {
-        val mins = intArrayOf(0, 15, 30, 45, 60)
-        val names = arrayOf("Off", "15 min", "30 min", "45 min", "60 min")
+        val mins = intArrayOf(0, 15, 30, 45, 60, 90)
+        val names = arrayOf("Off", "15 mins", "30 mins", "45 mins", "60 mins", "90 mins")
         AlertDialog.Builder(this)
-            .setTitle("Sleep timer")
+            .setTitle("Sleep Timer")
             .setItems(names) { _, i ->
                 ui.removeCallbacks(sleepRun)
                 if (mins[i] > 0) {
                     ui.postDelayed(sleepRun, mins[i] * 60000L)
-                    showMsg("Sleep timer: " + names[i])
+                    showMsg("Sleep Timer set for " + names[i])
                 } else {
-                    showMsg("Sleep timer off")
+                    showMsg("Sleep Timer Disabled")
                 }
             }
             .show()
@@ -412,9 +413,9 @@ class PlayerActivity : Activity() {
                 f.outputStream().use { out -> ins.copyTo(out) }
             }
             mp.addSlave(0, Uri.fromFile(f), true)
-            showMsg("Subtitle lag gaya")
+            showMsg("Subtitle successfully loaded")
         } catch (e: Exception) {
-            Toast.makeText(this, "Subtitle nahi laga: " + e.message, Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "Failed to load subtitle: " + e.message, Toast.LENGTH_LONG).show()
         }
     }
 
@@ -422,43 +423,43 @@ class PlayerActivity : Activity() {
         val key = items[idx].toString()
         val t = mp.getTime()
         Prefs.setBms(this, key, (Prefs.bms(this, key) + t).sorted())
-        showMsg("Bookmark: " + fmt(t))
+        showMsg("Bookmark added at " + fmt(t))
     }
 
     private fun bookmarksDialog() {
         val key = items[idx].toString()
         val l = Prefs.bms(this, key)
         if (l.isEmpty()) {
-            Toast.makeText(this, "Koi bookmark nahi hai", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "No bookmarks saved for this video", Toast.LENGTH_SHORT).show()
             return
         }
         val names = l.map { fmt(it) }.toTypedArray()
         AlertDialog.Builder(this)
-            .setTitle("Bookmarks")
+            .setTitle("Saved Bookmarks")
             .setItems(names) { _, i ->
                 mp.setTime(l[i])
                 showControls()
             }
-            .setNeutralButton("Sab hatao") { _, _ -> Prefs.setBms(this, key, emptyList()) }
+            .setNeutralButton("Clear All") { _, _ -> Prefs.setBms(this, key, emptyList()) }
             .show()
     }
 
     private fun abStep() {
         if (abA < 0) {
             abA = mp.getTime()
-            showMsg("A: " + fmt(abA))
+            showMsg("Point A set at " + fmt(abA))
         } else if (abB < 0) {
             val t = mp.getTime()
             if (t > abA) {
                 abB = t
-                showMsg("B: " + fmt(abB) + " (loop chalu)")
+                showMsg("Point B set. Loop Active!")
             } else {
-                showMsg("B, A ke baad hona chahiye")
+                showMsg("Point B must be after Point A")
             }
         } else {
             abA = -1L
             abB = -1L
-            showMsg("A-B repeat band")
+            showMsg("A-B Repeat Cleared")
         }
     }
 
@@ -469,7 +470,7 @@ class PlayerActivity : Activity() {
                 .setAspectRatio(if (videoPortrait) Rational(9, 16) else Rational(16, 9))
             enterPictureInPictureMode(b.build())
         } catch (e: Exception) {
-            Toast.makeText(this, "PiP nahi chal paya", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, "PiP mode not supported", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -486,13 +487,12 @@ class PlayerActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (locked) {
-            showMsg("Locked: unlock ke liye \uD83D\uDD12 ko dabaye rakho")
+            showMsg("Screen is locked. Long press lock icon to unlock.")
             return
         }
         super.onBackPressed()
     }
 
-    // ---------- onCreate ----------
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val u0 = intent.data
@@ -519,26 +519,28 @@ class PlayerActivity : Activity() {
         root.addView(touchView, FrameLayout.LayoutParams(MP, MP))
 
         msgTv = TextView(this)
-        msgTv.textSize = 22f
+        msgTv.textSize = 18f
         msgTv.setTextColor(Color.WHITE)
-        msgTv.setBackgroundColor(0xAA000000.toInt())
-        msgTv.setPadding(dp(20), dp(12), dp(20), dp(12))
+        val msgBg = GradientDrawable()
+        msgBg.setColor(0xCC000000.toInt())
+        msgBg.cornerRadius = dp(8).toFloat()
+        msgTv.background = msgBg
+        msgTv.setPadding(dp(20), dp(10), dp(20), dp(10))
         msgTv.visibility = View.GONE
         root.addView(msgTv, FrameLayout.LayoutParams(WC, WC, Gravity.CENTER))
 
-        // ---- top bar ----
         topBar = LinearLayout(this)
         topBar.gravity = Gravity.CENTER_VERTICAL
-        topBar.setBackgroundColor(0x88000000.toInt())
-        topBar.setPadding(dp(24), dp(8), dp(24), dp(8))
-        topBar.addView(ib("\u2190", 24f) { finish() })
+        topBar.setBackgroundColor(0x99000000.toInt())
+        topBar.setPadding(dp(20), dp(8), dp(20), dp(8))
+        topBar.addView(ib("←", 22f) { finish() })
         titleTv = TextView(this)
         titleTv.setTextColor(Color.WHITE)
         titleTv.textSize = 15f
         titleTv.maxLines = 1
         titleTv.ellipsize = TextUtils.TruncateAt.END
         topBar.addView(titleTv, LinearLayout.LayoutParams(0, WC, 1f))
-        topBar.addView(ib("\u27F3", 24f) {
+        topBar.addView(ib("🔄", 20f) {
             requestedOrientation =
                 if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
                     ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
@@ -547,19 +549,20 @@ class PlayerActivity : Activity() {
         })
         root.addView(topBar, FrameLayout.LayoutParams(MP, WC, Gravity.TOP))
 
-        // ---- bottom controls ----
         controls = LinearLayout(this)
         controls.orientation = LinearLayout.VERTICAL
-        controls.setBackgroundColor(0x88000000.toInt())
-        controls.setPadding(dp(24), dp(4), dp(24), dp(8))
+        controls.setBackgroundColor(0x99000000.toInt())
+        controls.setPadding(dp(20), dp(4), dp(20), dp(12))
 
         val seekRow = LinearLayout(this)
         seekRow.gravity = Gravity.CENTER_VERTICAL
         curTv = TextView(this)
         curTv.setTextColor(Color.WHITE)
+        curTv.textSize = 12f
         curTv.text = "0:00"
         durTv = TextView(this)
         durTv.setTextColor(Color.WHITE)
+        durTv.textSize = 12f
         durTv.text = "0:00"
         seek = SeekBar(this)
         seek.progressTintList = ColorStateList.valueOf(ac)
@@ -568,12 +571,10 @@ class PlayerActivity : Activity() {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
                 if (fromUser) curTv.text = fmt(p.toLong())
             }
-
             override fun onStartTrackingTouch(s: SeekBar?) {
                 userSeeking = true
                 ui.removeCallbacks(hideRun)
             }
-
             override fun onStopTrackingTouch(s: SeekBar?) {
                 mp.setTime((s?.progress ?: 0).toLong())
                 userSeeking = false
@@ -587,78 +588,77 @@ class PlayerActivity : Activity() {
 
         val trRow = LinearLayout(this)
         trRow.gravity = Gravity.CENTER
-        trRow.addView(ib("\u23EE", 26f) {
-            if (idx > 0) loadAt(idx - 1) else Toast.makeText(this, "Pehla video", Toast.LENGTH_SHORT).show()
+        trRow.addView(ib("⏮", 22f) {
+            if (idx > 0) loadAt(idx - 1) else Toast.makeText(this, "First video", Toast.LENGTH_SHORT).show()
         })
-        trRow.addView(ib("-10", 18f) { seekBy(-10000L); showControls() })
-        playBtn = ib("\u275A\u275A", 26f) { togglePlay() }
+        trRow.addView(ib("-${Prefs.seekSec(this)}s", 15f) { seekBy((-Prefs.seekSec(this) * 1000).toLong()); showControls() })
+        playBtn = ib("⏸", 24f) { togglePlay() }
         val circle = GradientDrawable()
         circle.shape = GradientDrawable.OVAL
         circle.setColor(ac)
         playBtn.background = circle
-        playBtn.setTextColor(if (Color.luminance(ac) > 0.5f) Color.BLACK else Color.WHITE)
-        val plp = LinearLayout.LayoutParams(dp(60), dp(60))
-        plp.setMargins(dp(8), 0, dp(8), 0)
+        playBtn.setTextColor(contrast(ac))
+        val plp = LinearLayout.LayoutParams(dp(54), dp(54))
+        plp.setMargins(dp(12), 0, dp(12), 0)
         trRow.addView(playBtn, plp)
-        trRow.addView(ib("+10", 18f) { seekBy(10000L); showControls() })
-        trRow.addView(ib("\u23ED", 26f) {
-            if (idx + 1 < items.size) loadAt(idx + 1) else Toast.makeText(this, "Aakhri video", Toast.LENGTH_SHORT).show()
+        trRow.addView(ib("+${Prefs.seekSec(this)}s", 15f) { seekBy((Prefs.seekSec(this) * 1000).toLong()); showControls() })
+        trRow.addView(ib("⏭", 22f) {
+            if (idx + 1 < items.size) loadAt(idx + 1) else Toast.makeText(this, "Last video", Toast.LENGTH_SHORT).show()
         })
         controls.addView(trRow)
 
         val exRow = LinearLayout(this)
         exRow.gravity = Gravity.CENTER
-        exRow.addView(ib("1x", 15f) { b ->
+        exRow.addView(ib("1.0x", 14f) { b ->
             speedIdx = (speedIdx + 1) % speeds.size
             mp.setRate(speeds[speedIdx])
             b.text = speeds[speedIdx].toString() + "x"
             showControls()
         })
-        exRow.addView(ib("Fit", 15f) { b ->
+        fitBtn = ib("Fit", 14f) { b ->
             scaleIdx = (scaleIdx + 1) % scales.size
             mp.setVideoScale(scales[scaleIdx])
             b.text = scaleNames[scaleIdx]
             showControls()
+        }
+        exRow.addView(fitBtn)
+        exRow.addView(ib("Audio", 14f) {
+            pickTrack("Audio Track", mp.getAudioTracks()) { id -> mp.setAudioTrack(id) }
         })
-        exRow.addView(ib("Audio", 15f) {
-            pickTrack("Audio track", mp.getAudioTracks()) { id -> mp.setAudioTrack(id) }
+        exRow.addView(ib("Sub", 14f) {
+            pickTrack("Subtitles", mp.getSpuTracks()) { id -> mp.setSpuTrack(id) }
         })
-        exRow.addView(ib("Sub", 15f) {
-            pickTrack("Subtitle", mp.getSpuTracks()) { id -> mp.setSpuTrack(id) }
-        })
-        exRow.addView(ib("\u22EF", 22f) { showMenu() })
+        exRow.addView(ib("⚙️", 18f) { showMenu() })
         controls.addView(exRow)
         root.addView(controls, FrameLayout.LayoutParams(MP, WC, Gravity.BOTTOM))
 
-        // ---- kids lock ----
-        lockBtn = ib("\uD83D\uDD13", 24f) { b ->
+        lockBtn = ib("🔓", 22f) { b ->
             if (locked) {
-                showMsg("Unlock ke liye icon ko dabaye rakho")
+                showMsg("Long press to unlock screen")
             } else {
                 locked = true
-                b.text = "\uD83D\uDD12"
+                b.text = "🔒"
                 topBar.visibility = View.GONE
                 controls.visibility = View.GONE
-                showMsg("Locked (kids lock)")
+                showMsg("Screen Locked (Kids Lock)")
             }
             showControls()
         }
         lockBtn.setOnLongClickListener {
             if (locked) {
                 locked = false
-                lockBtn.text = "\uD83D\uDD13"
-                showMsg("Unlock")
+                lockBtn.text = "🔓"
+                showMsg("Screen Unlocked")
                 showControls()
             }
             true
         }
         val llp = FrameLayout.LayoutParams(WC, WC, Gravity.START or Gravity.CENTER_VERTICAL)
-        llp.setMargins(dp(24), 0, 0, 0)
+        llp.setMargins(dp(20), 0, 0, 0)
         root.addView(lockBtn, llp)
 
         setContentView(root)
 
-        // ---- player ----
         vlc = LibVLC(this)
         mp = MediaPlayer(vlc)
         mp.attachViews(layout, null, true, false)
@@ -668,7 +668,17 @@ class PlayerActivity : Activity() {
             }
         }
 
-        // ---- gestures ----
+        val scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                videoScaleFactor *= detector.scaleFactor
+                videoScaleFactor = videoScaleFactor.coerceIn(0.5f, 3.5f)
+                layout.scaleX = videoScaleFactor
+                layout.scaleY = videoScaleFactor
+                showMsg("Zoom: " + Math.round(videoScaleFactor * 100) + "%")
+                return true
+            }
+        })
+
         val gd = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean = true
 
@@ -680,8 +690,9 @@ class PlayerActivity : Activity() {
             override fun onDoubleTap(e: MotionEvent): Boolean {
                 if (locked) return true
                 val w = touchView.width
-                if (e.x < w / 3f) seekBy(-10000L)
-                else if (e.x > w * 2f / 3f) seekBy(10000L)
+                val sMs = (Prefs.seekSec(this@PlayerActivity) * 1000).toLong()
+                if (e.x < w / 3f) seekBy(-sMs)
+                else if (e.x > w * 2f / 3f) seekBy(sMs)
                 else togglePlay()
                 return true
             }
@@ -711,17 +722,19 @@ class PlayerActivity : Activity() {
                     val lp = window.attributes
                     lp.screenBrightness = brightCur
                     window.attributes = lp
-                    showMsg("\u2600 " + Math.round(brightCur * 100) + "%")
+                    showMsg("☀️ " + Math.round(brightCur * 100) + "%")
                 } else if (gMode == 2) {
                     volCur = (volCur + dy / hgt * 1.5f).coerceIn(0f, 1f)
                     val mx = audioMgr.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                     audioMgr.setStreamVolume(AudioManager.STREAM_MUSIC, Math.round(volCur * mx), 0)
-                    showMsg("\uD83D\uDD0A " + Math.round(volCur * 100) + "%")
+                    showMsg("🔊 " + Math.round(volCur * 100) + "%")
                 }
                 return true
             }
         })
+
         touchView.setOnTouchListener { _, ev ->
+            scaleDetector.onTouchEvent(ev)
             gd.onTouchEvent(ev)
             if (ev.action == MotionEvent.ACTION_UP || ev.action == MotionEvent.ACTION_CANCEL) endGesture()
             true

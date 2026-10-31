@@ -36,7 +36,7 @@ import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
 
-    data class V(val name: String, val uri: Uri, val dur: Long, val size: Long, val folder: String)
+    data class V(val name: String, val uri: Uri, val dur: Long, val size: Long, val folder: String, val date: Long)
     data class Item(val title: String, val sub: String, val uri: Uri?, val badge: String, val tag: String)
     class H(val thumb: ImageView, val badge: TextView, val title: TextView, val sub: TextView)
 
@@ -48,16 +48,16 @@ class MainActivity : Activity() {
     private var shown: List<V> = emptyList()
     private var inSettings = false
     private var asked = false
-    private var tab = 0
+    private var tab = 0 // 0:Videos, 1:Folders, 2:Playlist
     private var openFolder: String? = null
     private var searchOn = false
     private var query = ""
-    private val cache = LruCache<String, Bitmap>(100)
-    private val pool = Executors.newFixedThreadPool(3)
+    private val cache = LruCache<String, Bitmap>(120)
+    private val pool = Executors.newFixedThreadPool(4)
 
     private val palette = listOf(
-        "#000000", "#101418", "#1E1E2E", "#263238", "#37474F", "#FFFFFF", "#EEEEEE", "#FFEB3B",
-        "#FF9800", "#F44336", "#E91E63", "#9C27B0", "#3F51B5", "#2196F3", "#00BCD4", "#00C853"
+        "#0B0F14", "#121820", "#1A222D", "#1E1E2E", "#2D1B36", "#0F2A3F", "#FFFFFF", "#FFD700",
+        "#FF9800", "#FF5252", "#FF4081", "#E040FB", "#7C4DFF", "#448AFF", "#00E5FF", "#00E676"
     )
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -113,7 +113,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---------- helpers ----------
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun perm(): String =
@@ -138,7 +137,7 @@ class MainActivity : Activity() {
         v.text = t
         v.textSize = size
         v.setTextColor(color)
-        v.setPadding(0, dp(8), 0, dp(8))
+        v.setPadding(0, dp(6), 0, dp(6))
         return v
     }
 
@@ -154,9 +153,9 @@ class MainActivity : Activity() {
     private fun sym(t: String, color: Int, f: () -> Unit): TextView {
         val v = TextView(this)
         v.text = t
-        v.textSize = 22f
+        v.textSize = 20f
         v.setTextColor(color)
-        v.setPadding(dp(10), dp(8), dp(10), dp(8))
+        v.setPadding(dp(10), dp(6), dp(10), dp(6))
         v.setOnClickListener { f() }
         return v
     }
@@ -164,11 +163,14 @@ class MainActivity : Activity() {
     private fun tabBtn(t: String, sel: Boolean, ac: Int, tc: Int, f: () -> Unit): TextView {
         val v = TextView(this)
         v.text = t
-        v.textSize = 15f
+        v.textSize = 14f
         v.gravity = Gravity.CENTER
         v.setPadding(0, dp(10), 0, dp(10))
         if (sel) {
-            v.setBackgroundColor(ac)
+            val gd = GradientDrawable()
+            gd.setColor(ac)
+            gd.cornerRadius = dp(8).toFloat()
+            v.background = gd
             v.setTextColor(contrast(ac))
         } else {
             v.setTextColor(tc)
@@ -185,7 +187,7 @@ class MainActivity : Activity() {
             iv.setImageURI(Uri.parse(w))
             frame.addView(iv, FrameLayout.LayoutParams(MP, MP))
             val dim = View(this)
-            dim.setBackgroundColor(0x99000000.toInt())
+            dim.setBackgroundColor(0xAA0B0F14.toInt())
             frame.addView(dim, FrameLayout.LayoutParams(MP, MP))
         } catch (e: Exception) {
             toast("Wallpaper nahi khul paya")
@@ -206,7 +208,7 @@ class MainActivity : Activity() {
 
     private fun folderName(p: String): String {
         val s = p.trim('/').split('/').lastOrNull() ?: ""
-        return if (s.isEmpty()) "Internal" else s
+        return if (s.isEmpty()) "Internal Storage" else s
     }
 
     private fun loadVideos() {
@@ -217,21 +219,24 @@ class MainActivity : Activity() {
             MediaStore.Video.Media.DISPLAY_NAME,
             MediaStore.Video.Media.DURATION,
             MediaStore.Video.Media.SIZE,
-            MediaStore.MediaColumns.RELATIVE_PATH
+            MediaStore.MediaColumns.RELATIVE_PATH,
+            MediaStore.Video.Media.DATE_ADDED
         )
         try {
-            contentResolver.query(base, proj, null, null, MediaStore.Video.Media.DATE_ADDED + " DESC")?.use { c ->
+            contentResolver.query(base, proj, null, null, null)?.use { c ->
                 val idc = c.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
                 val nc = c.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
                 val dc = c.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
                 val sc = c.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
                 val rc = c.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
+                val dac = c.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
                 while (c.moveToNext()) {
                     list.add(
                         V(
                             c.getString(nc) ?: "video",
                             ContentUris.withAppendedId(base, c.getLong(idc)),
-                            c.getLong(dc), c.getLong(sc), c.getString(rc) ?: ""
+                            c.getLong(dc), c.getLong(sc), c.getString(rc) ?: "",
+                            c.getLong(dac)
                         )
                     )
                 }
@@ -239,7 +244,19 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             toast("Videos load nahi hue")
         }
-        videos = list
+        videos = sortList(list)
+    }
+
+    private fun sortList(l: List<V>): List<V> {
+        val mode = Prefs.sortMode(this)
+        val asc = Prefs.sortAsc(this)
+        val sorted = when (mode) {
+            1 -> l.sortedBy { it.name.lowercase() }
+            2 -> l.sortedBy { it.size }
+            3 -> l.sortedBy { it.dur }
+            else -> l.sortedBy { it.date }
+        }
+        return if (asc) sorted else sorted.reversed()
     }
 
     private fun playList(list: List<V>, index: Int) {
@@ -271,9 +288,9 @@ class MainActivity : Activity() {
         val et = EditText(this)
         et.hint = "http://... ya rtsp://..."
         AlertDialog.Builder(this)
-            .setTitle("Network stream URL")
+            .setTitle("Network Stream URL")
             .setView(et)
-            .setPositiveButton("Chalao") { _, _ ->
+            .setPositiveButton("Play") { _, _ ->
                 val u = et.text.toString().trim()
                 if (u.isNotEmpty()) {
                     val i = Intent(this, PlayerActivity::class.java)
@@ -285,26 +302,87 @@ class MainActivity : Activity() {
             .show()
     }
 
-    // ---------- list rows ----------
+    private fun sortDialog() {
+        val modes = arrayOf("Date Added", "File Name", "File Size", "Video Length")
+        val orders = arrayOf("New to Old (Descending)", "Old to New (Ascending)")
+        var mIdx = Prefs.sortMode(this)
+        var aIdx = if (Prefs.sortAsc(this)) 1 else 0
+
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(16), dp(8), dp(16), dp(8))
+
+        box.addView(label("Sort Criteria", 15f, Prefs.text(this)))
+        val lv = ListView(this)
+        lv.adapter = object : BaseAdapter() {
+            override fun getCount() = modes.size
+            override fun getItem(i: Int) = modes[i]
+            override fun getItemId(i: Int) = i.toLong()
+            override fun getView(i: Int, cv: View?, p: ViewGroup?): View {
+                val t = TextView(this@MainActivity)
+                t.text = (if (mIdx == i) "⚡ " else "   ") + modes[i]
+                t.textSize = 15f
+                t.setTextColor(Prefs.text(this@MainActivity))
+                t.setPadding(0, dp(6), 0, dp(6))
+                return t
+            }
+        }
+        lv.setOnItemClickListener { _, _, i, _ -> mIdx = i; lv.invalidateViews() }
+        box.addView(lv, LinearLayout.LayoutParams(MP, dp(140)))
+
+        box.addView(label("Order Direction", 15f, Prefs.text(this)))
+        val lv2 = ListView(this)
+        lv2.adapter = object : BaseAdapter() {
+            override fun getCount() = orders.size
+            override fun getItem(i: Int) = orders[i]
+            override fun getItemId(i: Int) = i.toLong()
+            override fun getView(i: Int, cv: View?, p: ViewGroup?): View {
+                val t = TextView(this@MainActivity)
+                t.text = (if (aIdx == i) "⚡ " else "   ") + orders[i]
+                t.textSize = 15f
+                t.setTextColor(Prefs.text(this@MainActivity))
+                t.setPadding(0, dp(6), 0, dp(6))
+                return t
+            }
+        }
+        lv2.setOnItemClickListener { _, _, i, _ -> aIdx = i; lv2.invalidateViews() }
+        box.addView(lv2, LinearLayout.LayoutParams(MP, dp(90)))
+
+        AlertDialog.Builder(this)
+            .setTitle("Advanced Sorting")
+            .setView(box)
+            .setPositiveButton("Apply") { _, _ ->
+                Prefs.setSortMode(this, mIdx)
+                Prefs.setSortAsc(this, aIdx == 1)
+                showHome()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
     private fun makeRow(): Pair<View, H> {
         val row = LinearLayout(this)
         row.gravity = Gravity.CENTER_VERTICAL
-        row.setPadding(0, dp(6), 0, dp(6))
+        row.setPadding(dp(6), dp(6), dp(6), dp(6))
 
         val box = FrameLayout(this)
         val thumb = ImageView(this)
         thumb.scaleType = ImageView.ScaleType.CENTER_CROP
-        thumb.setBackgroundColor(0xFF222222.toInt())
+        thumb.setBackgroundColor(0xFF1E1E2E.toInt())
         box.addView(thumb, FrameLayout.LayoutParams(MP, MP))
+
         val badge = TextView(this)
         badge.textSize = 11f
         badge.setTextColor(Color.WHITE)
-        badge.setBackgroundColor(0xAA000000.toInt())
-        badge.setPadding(dp(4), dp(1), dp(4), dp(1))
+        badge.setBackgroundColor(0xCC000000.toInt())
+        badge.setPadding(dp(6), dp(2), dp(6), dp(2))
         val blp = FrameLayout.LayoutParams(WC, WC, Gravity.BOTTOM or Gravity.END)
         blp.setMargins(0, 0, dp(4), dp(4))
         box.addView(badge, blp)
-        row.addView(box, LinearLayout.LayoutParams(dp(128), dp(72)))
+
+        val rowWidth = if (Prefs.gridView(this)) dp(140) else dp(130)
+        val rowHeight = if (Prefs.gridView(this)) dp(180) else dp(74)
+        row.addView(box, LinearLayout.LayoutParams(rowWidth, rowHeight))
 
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
@@ -341,7 +419,7 @@ class MainActivity : Activity() {
             holder.title.text = item.title
             holder.title.setTextColor(tc)
             holder.sub.text = item.sub
-            holder.sub.setTextColor((tc and 0x00FFFFFF) or 0xAA000000.toInt())
+            holder.sub.setTextColor((tc and 0x00FFFFFF) or 0x99000000.toInt())
             holder.badge.text = item.badge
             holder.badge.visibility = if (item.badge.isEmpty()) View.GONE else View.VISIBLE
 
@@ -373,7 +451,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---------- Home ----------
     private fun showHome() {
         inSettings = false
         if (hasPerm()) loadVideos()
@@ -385,11 +462,17 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        root.setPadding(dp(12), dp(36), dp(12), 0)
+        root.setPadding(dp(12), dp(32), dp(12), 0)
 
         val head = LinearLayout(this)
         head.gravity = Gravity.CENTER_VERTICAL
-        head.addView(label("RajPlayer", 24f, tc), LinearLayout.LayoutParams(0, WC, 1f))
+        val brand = TextView(this)
+        brand.text = "⚡ RajPlayer Pro"
+        brand.textSize = 22f
+        brand.setTextColor(ac)
+        brand.setTypeface(null, android.graphics.Typeface.BOLD)
+        head.addView(brand, LinearLayout.LayoutParams(0, WC, 1f))
+
         head.addView(sym("\uD83D\uDD0D", tc) {
             searchOn = !searchOn
             if (!searchOn) query = ""
@@ -400,31 +483,40 @@ class MainActivity : Activity() {
         head.addView(sym("\u2699", tc) { showSettings() })
         root.addView(head)
 
+        val navRow = LinearLayout(this)
+        navRow.gravity = Gravity.CENTER_VERTICAL
+        navRow.setPadding(0, dp(8), 0, dp(8))
+
         val tabs = LinearLayout(this)
         tabs.addView(tabBtn("Videos", tab == 0, ac, tc) {
-            tab = 0
-            openFolder = null
-            showHome()
+            tab = 0; openFolder = null; showHome()
         }, LinearLayout.LayoutParams(0, WC, 1f))
         tabs.addView(tabBtn("Folders", tab == 1, ac, tc) {
-            tab = 1
-            openFolder = null
-            showHome()
+            tab = 1; openFolder = null; showHome()
         }, LinearLayout.LayoutParams(0, WC, 1f))
-        root.addView(tabs)
+        tabs.addView(tabBtn("Playlist", tab == 2, ac, tc) {
+            tab = 2; openFolder = null; showHome()
+        }, LinearLayout.LayoutParams(0, WC, 1f))
+        navRow.addView(tabs, LinearLayout.LayoutParams(0, WC, 1f))
+
+        navRow.addView(sym("\u21C5", tc) { sortDialog() })
+        navRow.addView(sym(if (Prefs.gridView(this)) "\u2637" else "\u2638", tc) {
+            Prefs.setGridView(this, !Prefs.gridView(this))
+            showHome()
+        })
+        root.addView(navRow)
 
         if (searchOn) {
             val se = EditText(this)
-            se.hint = "Video khojo..."
+            se.hint = "Search videos instantly..."
             se.setTextColor(tc)
-            se.setHintTextColor(0x88FFFFFF.toInt())
+            se.setHintTextColor(0x77FFFFFF.toInt())
             se.setText(query)
             se.addTextChangedListener(object : TextWatcher {
                 override fun afterTextChanged(s: Editable?) {
                     query = s?.toString() ?: ""
                     renderList()
                 }
-
                 override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
                 override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
             })
@@ -445,46 +537,54 @@ class MainActivity : Activity() {
         if (!hasPerm()) {
             val col = LinearLayout(this)
             col.orientation = LinearLayout.VERTICAL
-            col.addView(label("Videos dikhane ke liye permission chahiye.", 16f, tc))
-            col.addView(button("Permission do", ac) { reqPerms() })
+            col.setPadding(dp(16), dp(24), dp(16), 0)
+            col.addView(label("Storage permission is required to list media files.", 16f, tc))
+            col.addView(button("Grant Permission", ac) { reqPerms() })
             listHolder.addView(col)
             return
         }
         if (videos.isEmpty()) {
-            listHolder.addView(label("Koi video nahi mila. Upar \uD83D\uDCC2 se file chuno.", 16f, tc))
+            listHolder.addView(label("No media files found. Use folder or file picker above.", 15f, tc))
             return
         }
 
         val items = ArrayList<Item>()
         val of = openFolder
         val q = query.trim().lowercase()
+
         if (q.isNotEmpty()) {
             shown = videos.filter { it.name.lowercase().contains(q) }
             for (v in shown) {
-                items.add(Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), "V"))
+                items.add(Item(v.name, folderName(v.folder) + " • " + sizeStr(v.size), v.uri, durStr(v.dur), "V"))
+            }
+        } else if (tab == 2) {
+            shown = videos
+            for (v in shown) {
+                items.add(Item(v.name, folderName(v.folder) + " • " + sizeStr(v.size), v.uri, durStr(v.dur), "V"))
             }
         } else if (tab == 0 || of != null) {
             shown = if (of != null) videos.filter { it.folder == of } else videos
             for (v in shown) {
-                items.add(Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), "V"))
+                items.add(Item(v.name, folderName(v.folder) + " • " + sizeStr(v.size), v.uri, durStr(v.dur), "V"))
             }
         } else {
             val groups = videos.groupBy { it.folder }
             val keys = groups.keys.sortedBy { folderName(it).lowercase() }
             for (k in keys) {
                 val l = groups[k] ?: continue
-                items.add(Item(folderName(k), l.size.toString() + " videos", l[0].uri, l.size.toString(), "F:" + k))
+                items.add(Item(folderName(k), "${l.size} videos", l[0].uri, "${l.size}", "F:$k"))
             }
         }
 
         if (items.isEmpty()) {
-            listHolder.addView(label("Kuch nahi mila.", 16f, tc))
+            listHolder.addView(label("No items found.", 15f, tc))
             return
         }
 
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
-        if (of != null && q.isEmpty()) col.addView(label("\uD83D\uDCC1 " + folderName(of), 15f, tc))
+        if (of != null && q.isEmpty()) col.addView(label("📁 " + folderName(of), 15f, tc))
+
         val lv = ListView(this)
         lv.divider = null
         lv.adapter = makeAdapter(items, tc)
@@ -501,7 +601,6 @@ class MainActivity : Activity() {
         listHolder.addView(col, FrameLayout.LayoutParams(MP, MP))
     }
 
-    // ---------- Settings ----------
     private fun applyPreset(bg: String, tx: String, ac: String) {
         Prefs.setBg(this, Color.parseColor(bg))
         Prefs.setText(this, Color.parseColor(tx))
@@ -512,7 +611,7 @@ class MainActivity : Activity() {
     private fun colorRow(root: LinearLayout, title: String, set: (Int) -> Unit) {
         val tc = Prefs.text(this)
         val ac = Prefs.accent(this)
-        root.addView(label(title, 16f, tc))
+        root.addView(label(title, 15f, tc))
 
         val hs = HorizontalScrollView(this)
         val row = LinearLayout(this)
@@ -521,10 +620,10 @@ class MainActivity : Activity() {
             val b = View(this)
             val gd = GradientDrawable()
             gd.setColor(c)
-            gd.setStroke(dp(1), 0xFF888888.toInt())
-            gd.cornerRadius = dp(6).toFloat()
+            gd.setStroke(dp(1), 0xFF555555.toInt())
+            gd.cornerRadius = dp(8).toFloat()
             b.background = gd
-            val lp = LinearLayout.LayoutParams(dp(36), dp(36))
+            val lp = LinearLayout.LayoutParams(dp(38), dp(38))
             lp.setMargins(dp(4), dp(4), dp(4), dp(4))
             b.layoutParams = lp
             b.setOnClickListener {
@@ -537,16 +636,16 @@ class MainActivity : Activity() {
         root.addView(hs)
 
         val et = EditText(this)
-        et.hint = "#RRGGBB"
+        et.hint = "Custom #HexColor"
         et.setTextColor(tc)
-        et.setHintTextColor(0x88FFFFFF.toInt())
+        et.setHintTextColor(0x77FFFFFF.toInt())
         root.addView(et)
-        root.addView(button("Ye rang lagao", ac) {
+        root.addView(button("Apply Color", ac) {
             try {
                 set(Color.parseColor(et.text.toString().trim()))
                 showSettings()
             } catch (e: Exception) {
-                toast("Galat hex code")
+                toast("Invalid Hex Code")
             }
         })
     }
@@ -563,27 +662,45 @@ class MainActivity : Activity() {
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.setPadding(dp(16), dp(40), dp(16), dp(24))
-        root.addView(label("Settings", 26f, tc))
-        root.addView(button("Wapas", ac) { showHome() })
+        root.addView(label("⚙️ Ultra Settings", 24f, tc))
+        root.addView(button("← Back to Player", ac) { showHome() })
 
-        root.addView(label("Ready themes", 16f, tc))
+        root.addView(label("Manual Double-Tap Seek Time", 15f, tc))
+        val seekSecs = intArrayOf(5, 10, 15, 20, 30)
+        val seekNames = arrayOf("5 seconds", "10 seconds", "15 seconds", "20 seconds", "30 seconds")
+        val sbBtn = Button(this)
+        sbBtn.text = "Current Seek: " + Prefs.seekSec(this) + "s"
+        sbBtn.setBackgroundColor(ac)
+        sbBtn.setTextColor(contrast(ac))
+        sbBtn.setOnClickListener {
+            AlertDialog.Builder(this)
+                .setTitle("Select Seek Duration")
+                .setItems(seekNames) { _, i ->
+                    Prefs.setSeekSec(this, seekSecs[i])
+                    showSettings()
+                }
+                .show()
+        }
+        root.addView(sbBtn)
+
+        root.addView(label("Preset Themes", 15f, tc))
         val ths = HorizontalScrollView(this)
         val thr = LinearLayout(this)
-        thr.addView(button("Dark", ac) { applyPreset("#101418", "#FFFFFF", "#00C853") })
-        thr.addView(button("AMOLED", ac) { applyPreset("#000000", "#FFFFFF", "#00E5FF") })
-        thr.addView(button("Blue", ac) { applyPreset("#0D1B2A", "#E0E1DD", "#2196F3") })
-        thr.addView(button("Purple", ac) { applyPreset("#1B1030", "#FFFFFF", "#B388FF") })
-        thr.addView(button("Light", ac) { applyPreset("#FAFAFA", "#111111", "#1976D2") })
+        thr.addView(button("Cyber Dark", ac) { applyPreset("#0B0F14", "#FFFFFF", "#00E676") })
+        thr.addView(button("OLED Black", ac) { applyPreset("#000000", "#FFFFFF", "#00E5FF") })
+        thr.addView(button("Royal Blue", ac) { applyPreset("#0D1B2A", "#E0E1DD", "#448AFF") })
+        thr.addView(button("Deep Purple", ac) { applyPreset("#1A122B", "#FFFFFF", "#E040FB") })
+        thr.addView(button("Clean Light", ac) { applyPreset("#F5F7FA", "#111111", "#2979FF") })
         ths.addView(thr)
         root.addView(ths)
 
-        colorRow(root, "Background rang") { Prefs.setBg(this, it) }
-        colorRow(root, "Text rang") { Prefs.setText(this, it) }
-        colorRow(root, "Accent (button) rang") { Prefs.setAccent(this, it) }
+        colorRow(root, "Background Color") { Prefs.setBg(this, it) }
+        colorRow(root, "Text Color") { Prefs.setText(this, it) }
+        colorRow(root, "Accent & Button Color") { Prefs.setAccent(this, it) }
 
-        root.addView(label("Wallpaper", 16f, tc))
-        root.addView(button("Wallpaper chuno", ac) { pickWall() })
-        root.addView(button("Wallpaper hatao", ac) {
+        root.addView(label("Custom Wallpaper", 15f, tc))
+        root.addView(button("Pick Wallpaper Image", ac) { pickWall() })
+        root.addView(button("Remove Wallpaper", ac) {
             Prefs.setWall(this, null)
             showSettings()
         })
