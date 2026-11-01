@@ -11,7 +11,7 @@ android {
         applicationId = "com.raj.rajplayer"
         minSdk = 29
         targetSdk = 34
-        versionCode = 4
+        versionCode = 5
         versionName = "1.2"
         ndk { abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a")) }
     }

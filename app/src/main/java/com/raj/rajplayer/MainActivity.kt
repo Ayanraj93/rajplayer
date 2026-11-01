@@ -12,6 +12,8 @@ import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.provider.MediaStore
 import android.text.Editable
 import android.text.TextUtils
@@ -21,6 +23,7 @@ import android.util.Size
 import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
+import android.widget.AdapterView
 import android.widget.BaseAdapter
 import android.widget.Button
 import android.widget.EditText
@@ -38,21 +41,32 @@ class MainActivity : Activity() {
 
     data class V(val name: String, val uri: Uri, val dur: Long, val size: Long, val folder: String, val date: Long)
     data class Item(val title: String, val sub: String, val uri: Uri?, val badge: String, val tag: String)
-    class H(val thumb: ImageView, val badge: TextView, val title: TextView, val sub: TextView)
+    class H(val check: TextView, val thumb: ImageView, val badge: TextView, val title: TextView, val sub: TextView)
 
     private val MP = ViewGroup.LayoutParams.MATCH_PARENT
     private val WC = ViewGroup.LayoutParams.WRAP_CONTENT
     private lateinit var frame: FrameLayout
     private lateinit var listHolder: FrameLayout
+    private lateinit var miniBar: LinearLayout
+    private lateinit var miniTitle: TextView
+    private lateinit var miniPlay: TextView
+    private var selCountTv: TextView? = null
+    private var curAdapter: BaseAdapter? = null
+
     private var videos: List<V> = emptyList()
     private var audios: List<V> = emptyList()
     private var shown: List<V> = emptyList()
     private var inSettings = false
     private var asked = false
-    private var tab = 0 
+    private var dirty = true
+    private var tab = 0
     private var openFolder: String? = null
     private var searchOn = false
     private var query = ""
+    private var selectMode = false
+    private val selected = LinkedHashSet<String>()
+
+    private val ui = Handler(Looper.getMainLooper())
     private val cache = LruCache<String, Bitmap>(120)
     private val pool = Executors.newFixedThreadPool(4)
 
@@ -61,10 +75,18 @@ class MainActivity : Activity() {
         "#FF9800", "#FF5252", "#FF4081", "#E040FB", "#7C4DFF", "#448AFF", "#00E5FF", "#00E676"
     )
 
+    private val miniTick = object : Runnable {
+        override fun run() {
+            refreshMini()
+            ui.postDelayed(this, 700)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         frame = FrameLayout(this)
         setContentView(frame)
+        Engine.bgAudio = Prefs.bgAudio(this)
     }
 
     override fun onResume() {
@@ -73,17 +95,27 @@ class MainActivity : Activity() {
             asked = true
             reqPerms()
         }
+        dirty = true
         if (inSettings) showSettings() else showHome()
+        ui.post(miniTick)
+    }
+
+    override fun onPause() {
+        super.onPause()
+        ui.removeCallbacks(miniTick)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        dirty = true
         showHome()
     }
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
-        if (inSettings) {
+        if (selectMode) {
+            exitSelect()
+        } else if (inSettings) {
             showHome()
         } else if (openFolder != null) {
             openFolder = null
@@ -96,14 +128,13 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 9) {
+            if (resultCode == RESULT_OK) afterDelete() else toast("Delete cancel hua")
+            return
+        }
         if (resultCode != RESULT_OK) return
         val u = data?.data ?: return
-        if (requestCode == 2) {
-            val i = Intent(this, PlayerActivity::class.java)
-            i.data = u
-            i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            startActivity(i)
-        }
+        if (requestCode == 2) openUri(u)
         if (requestCode == 3) {
             try {
                 contentResolver.takePersistableUriPermission(u, Intent.FLAG_GRANT_READ_URI_PERMISSION)
@@ -114,6 +145,7 @@ class MainActivity : Activity() {
         }
     }
 
+    // ---------- helpers ----------
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun perm(): String =
@@ -124,7 +156,18 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO
         else Manifest.permission.READ_EXTERNAL_STORAGE
 
-    private fun hasPerm() = checkSelfPermission(perm()) == PackageManager.PERMISSION_GRANTED || checkSelfPermission(audioPerm()) == PackageManager.PERMISSION_GRANTED
+    // video YA audio me se koi ek mil jaye to bhi list dikhao
+    private fun hasPerm() =
+        checkSelfPermission(perm()) == PackageManager.PERMISSION_GRANTED ||
+                checkSelfPermission(audioPerm()) == PackageManager.PERMISSION_GRANTED
+
+    private fun reqPerms() {
+        val l = ArrayList<String>()
+        l.add(perm())
+        if (audioPerm() != perm()) l.add(audioPerm())
+        if (Build.VERSION.SDK_INT >= 33) l.add(Manifest.permission.POST_NOTIFICATIONS)
+        requestPermissions(l.toTypedArray(), 1)
+    }
 
     private fun openAppSettings() {
         val i = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
@@ -132,24 +175,18 @@ class MainActivity : Activity() {
         startActivity(i)
     }
 
-    private fun reqPerms() {
-        val l = ArrayList<String>()
-        l.add(perm())
-        l.add(audioPerm())
-        if (Build.VERSION.SDK_INT >= 33) l.add(Manifest.permission.POST_NOTIFICATIONS)
-        requestPermissions(l.toTypedArray(), 1)
-    }
-
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
 
     private fun contrast(c: Int) = if (Color.luminance(c) > 0.5f) Color.BLACK else Color.WHITE
+
+    private fun isAudio(u: Uri) = u.toString().contains("/audio/")
 
     private fun label(t: String, size: Float, color: Int): TextView {
         val v = TextView(this)
         v.text = t
         v.textSize = size
         v.setTextColor(color)
-        v.setPadding(0, dp(6), 0, dp(6))
+        v.setPadding(0, dp(8), 0, dp(8))
         return v
     }
 
@@ -165,9 +202,9 @@ class MainActivity : Activity() {
     private fun sym(t: String, color: Int, f: () -> Unit): TextView {
         val v = TextView(this)
         v.text = t
-        v.textSize = 20f
+        v.textSize = 22f
         v.setTextColor(color)
-        v.setPadding(dp(10), dp(6), dp(10), dp(6))
+        v.setPadding(dp(10), dp(8), dp(10), dp(8))
         v.setOnClickListener { f() }
         return v
     }
@@ -175,14 +212,11 @@ class MainActivity : Activity() {
     private fun tabBtn(t: String, sel: Boolean, ac: Int, tc: Int, f: () -> Unit): TextView {
         val v = TextView(this)
         v.text = t
-        v.textSize = 13f
+        v.textSize = 14f
         v.gravity = Gravity.CENTER
-        v.setPadding(dp(6), dp(8), dp(6), dp(8))
+        v.setPadding(0, dp(10), 0, dp(10))
         if (sel) {
-            val gd = GradientDrawable()
-            gd.setColor(ac)
-            gd.cornerRadius = dp(8).toFloat()
-            v.background = gd
+            v.setBackgroundColor(ac)
             v.setTextColor(contrast(ac))
         } else {
             v.setTextColor(tc)
@@ -199,7 +233,7 @@ class MainActivity : Activity() {
             iv.setImageURI(Uri.parse(w))
             frame.addView(iv, FrameLayout.LayoutParams(MP, MP))
             val dim = View(this)
-            dim.setBackgroundColor(0xAA0B0F14.toInt())
+            dim.setBackgroundColor(0x99000000.toInt())
             frame.addView(dim, FrameLayout.LayoutParams(MP, MP))
         } catch (e: Exception) {
             toast("Wallpaper nahi khul paya")
@@ -223,6 +257,7 @@ class MainActivity : Activity() {
         return if (s.isEmpty()) "Internal Storage" else s
     }
 
+    // ---------- media load ----------
     private fun loadMedia() {
         val vList = ArrayList<V>()
         val vBase = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
@@ -268,7 +303,7 @@ class MainActivity : Activity() {
             MediaStore.Audio.Media.DATE_ADDED
         )
         try {
-            contentResolver.query(aBase, aProj, MediaStore.Audio.Media.IS_MUSIC + "!= 0", null, null)?.use { c ->
+            contentResolver.query(aBase, aProj, MediaStore.Audio.Media.IS_MUSIC + " != 0", null, null)?.use { c ->
                 val idc = c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
                 val nc = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
                 val dc = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
@@ -303,13 +338,35 @@ class MainActivity : Activity() {
         return if (asc) sorted else sorted.reversed()
     }
 
+    // ---------- play ----------
     private fun playList(list: List<V>, index: Int) {
         if (index < 0 || index >= list.size) return
-        val i = Intent(this, PlayerActivity::class.java)
-        i.data = list[index].uri
-        i.putStringArrayListExtra("list", ArrayList(list.map { it.uri.toString() }))
-        i.putExtra("idx", index)
+        val cur = list[index]
+        val aud = isAudio(cur.uri)
+        val q = list.filter { isAudio(it.uri) == aud }
+        val qi = q.indexOfFirst { it.uri == cur.uri }
+        val i = Intent(this, if (aud) AudioActivity::class.java else PlayerActivity::class.java)
+        i.data = cur.uri
+        i.putStringArrayListExtra("list", ArrayList(q.map { it.uri.toString() }))
+        i.putStringArrayListExtra("names", ArrayList(q.map { it.name }))
+        i.putExtra("idx", qi)
         i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        startActivity(i)
+    }
+
+    private fun openUri(u: Uri) {
+        val aud = (contentResolver.getType(u) ?: "").startsWith("audio/")
+        val i = Intent(this, if (aud) AudioActivity::class.java else PlayerActivity::class.java)
+        i.data = u
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        startActivity(i)
+    }
+
+    private fun openNowPlaying() {
+        val i = Intent(this, if (Engine.isVideo) PlayerActivity::class.java else AudioActivity::class.java)
+        i.data = Engine.items.getOrNull(Engine.idx)
+        i.putExtra("cont", true)
+        i.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
         startActivity(i)
     }
 
@@ -346,6 +403,84 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // ---------- select + delete ----------
+    private fun toggleSel(u: Uri?) {
+        if (u == null) return
+        val k = u.toString()
+        if (selected.contains(k)) selected.remove(k) else selected.add(k)
+        updateSelCount()
+    }
+
+    private fun updateSelCount() {
+        selCountTv?.text = selected.size.toString() + " selected"
+        curAdapter?.notifyDataSetChanged()
+    }
+
+    private fun selectAll() {
+        for (v in shown) selected.add(v.uri.toString())
+        updateSelCount()
+    }
+
+    private fun exitSelect() {
+        selectMode = false
+        selected.clear()
+        showHome()
+    }
+
+    private fun favSelected() {
+        if (selected.isEmpty()) {
+            toast("Pehle koi item tick karo")
+            return
+        }
+        var n = 0
+        for (k in selected) {
+            if (!Prefs.isFav(this, k)) {
+                Prefs.toggleFav(this, k)
+                n++
+            }
+        }
+        toast(n.toString() + " item Playlist me jode \u2B50")
+        exitSelect()
+    }
+
+    private fun confirmDelete() {
+        if (selected.isEmpty()) {
+            toast("Pehle koi item tick karo")
+            return
+        }
+        AlertDialog.Builder(this)
+            .setTitle("Delete karna hai?")
+            .setMessage(selected.size.toString() + " file hamesha ke liye delete ho jayegi. Wapas nahi aayegi.")
+            .setPositiveButton("Delete") { _, _ -> doDelete() }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun doDelete() {
+        val uris = selected.map { Uri.parse(it) }
+        try {
+            if (Build.VERSION.SDK_INT >= 30) {
+                val pi = MediaStore.createDeleteRequest(contentResolver, uris)
+                startIntentSenderForResult(pi.intentSender, 9, null, 0, 0, 0)
+            } else {
+                for (u in uris) contentResolver.delete(u, null, null)
+                afterDelete()
+            }
+        } catch (e: Exception) {
+            toast("Delete nahi ho paya: " + e.message)
+        }
+    }
+
+    private fun afterDelete() {
+        if (Engine.active && selected.contains(Engine.cur().toString())) Engine.stopAll(this)
+        selected.clear()
+        selectMode = false
+        dirty = true
+        toast("Delete ho gaya")
+        showHome()
+    }
+
+    // ---------- sort dialog ----------
     private fun sortDialog() {
         val modes = arrayOf("Date Added", "File Name", "File Size", "Length")
         val orders = arrayOf("New to Old", "Old to New")
@@ -364,14 +499,17 @@ class MainActivity : Activity() {
             override fun getItemId(i: Int) = i.toLong()
             override fun getView(i: Int, cv: View?, p: ViewGroup?): View {
                 val t = TextView(this@MainActivity)
-                t.text = (if (mIdx == i) "⚡ " else "   ") + modes[i]
+                t.text = (if (mIdx == i) "\u26A1 " else "   ") + modes[i]
                 t.textSize = 15f
                 t.setTextColor(Prefs.text(this@MainActivity))
                 t.setPadding(0, dp(6), 0, dp(6))
                 return t
             }
         }
-        lv.setOnItemClickListener { _, _, i, _ -> mIdx = i; lv.invalidateViews() }
+        lv.setOnItemClickListener { _, _, i, _ ->
+            mIdx = i
+            lv.invalidateViews()
+        }
         box.addView(lv, LinearLayout.LayoutParams(MP, dp(140)))
 
         box.addView(label("Order Direction", 15f, Prefs.text(this)))
@@ -382,14 +520,17 @@ class MainActivity : Activity() {
             override fun getItemId(i: Int) = i.toLong()
             override fun getView(i: Int, cv: View?, p: ViewGroup?): View {
                 val t = TextView(this@MainActivity)
-                t.text = (if (aIdx == i) "⚡ " else "   ") + orders[i]
+                t.text = (if (aIdx == i) "\u26A1 " else "   ") + orders[i]
                 t.textSize = 15f
                 t.setTextColor(Prefs.text(this@MainActivity))
                 t.setPadding(0, dp(6), 0, dp(6))
                 return t
             }
         }
-        lv2.setOnItemClickListener { _, _, i, _ -> aIdx = i; lv2.invalidateViews() }
+        lv2.setOnItemClickListener { _, _, i, _ ->
+            aIdx = i
+            lv2.invalidateViews()
+        }
         box.addView(lv2, LinearLayout.LayoutParams(MP, dp(90)))
 
         AlertDialog.Builder(this)
@@ -398,16 +539,24 @@ class MainActivity : Activity() {
             .setPositiveButton("Apply") { _, _ ->
                 Prefs.setSortMode(this, mIdx)
                 Prefs.setSortAsc(this, aIdx == 1)
+                dirty = true
                 showHome()
             }
             .setNegativeButton("Cancel", null)
             .show()
     }
 
+    // ---------- rows ----------
     private fun makeRow(): Pair<View, H> {
         val row = LinearLayout(this)
         row.gravity = Gravity.CENTER_VERTICAL
         row.setPadding(dp(6), dp(6), dp(6), dp(6))
+
+        val check = TextView(this)
+        check.textSize = 22f
+        check.setPadding(dp(2), 0, dp(10), 0)
+        check.visibility = View.GONE
+        row.addView(check)
 
         val box = FrameLayout(this)
         val thumb = ImageView(this)
@@ -440,10 +589,10 @@ class MainActivity : Activity() {
         col.addView(title)
         col.addView(sub)
         row.addView(col, LinearLayout.LayoutParams(0, WC, 1f))
-        return Pair(row, H(thumb, badge, title, sub))
+        return Pair(row, H(check, thumb, badge, title, sub))
     }
 
-    private fun makeAdapter(items: List<Item>, tc: Int): BaseAdapter = object : BaseAdapter() {
+    private fun makeAdapter(items: List<Item>, tc: Int, ac: Int): BaseAdapter = object : BaseAdapter() {
         override fun getCount(): Int = items.size
         override fun getItem(position: Int): Any = items[position]
         override fun getItemId(position: Int): Long = position.toLong()
@@ -460,6 +609,7 @@ class MainActivity : Activity() {
                 holder = convertView.tag as H
             }
             val item = items[position]
+            val isFolder = item.tag.startsWith("F:")
             holder.title.text = item.title
             holder.title.setTextColor(tc)
             holder.sub.text = item.sub
@@ -468,6 +618,10 @@ class MainActivity : Activity() {
             holder.badge.visibility = if (item.badge.isEmpty()) View.GONE else View.VISIBLE
 
             val u = item.uri
+            holder.check.visibility = if (selectMode && !isFolder) View.VISIBLE else View.GONE
+            holder.check.setTextColor(ac)
+            holder.check.text = if (u != null && selected.contains(u.toString())) "\u2611" else "\u2610"
+
             holder.thumb.setImageBitmap(null)
             if (u != null) {
                 val key = u.toString()
@@ -495,9 +649,50 @@ class MainActivity : Activity() {
         }
     }
 
+    // ---------- mini player ----------
+    private fun refreshMini() {
+        if (!::miniBar.isInitialized) return
+        if (!Engine.active || inSettings) {
+            miniBar.visibility = View.GONE
+            return
+        }
+        miniBar.visibility = View.VISIBLE
+        miniTitle.text = (if (Engine.isVideo) "\uD83C\uDFAC " else "\uD83C\uDFB5 ") + Engine.title
+        miniPlay.text = if (Engine.isPlaying()) "\u23F8" else "\u25B6"
+    }
+
+    private fun buildMini(tc: Int, ac: Int): LinearLayout {
+        val bar = LinearLayout(this)
+        bar.gravity = Gravity.CENTER_VERTICAL
+        bar.setPadding(dp(12), dp(4), dp(4), dp(4))
+        val g = GradientDrawable()
+        g.setColor(0xEE1A222D.toInt())
+        g.setStroke(dp(1), ac)
+        g.cornerRadius = dp(14).toFloat()
+        bar.background = g
+        miniTitle = TextView(this)
+        miniTitle.setTextColor(Color.WHITE)
+        miniTitle.textSize = 13f
+        miniTitle.maxLines = 1
+        miniTitle.ellipsize = TextUtils.TruncateAt.END
+        bar.addView(miniTitle, LinearLayout.LayoutParams(0, WC, 1f))
+        bar.addView(sym("\u23EE", Color.WHITE) { Engine.prev(this) })
+        miniPlay = sym("\u23F8", Color.WHITE) { Engine.toggle(this) }
+        bar.addView(miniPlay)
+        bar.addView(sym("\u23ED", Color.WHITE) { Engine.next(this) })
+        bar.addView(sym("\u2715", Color.WHITE) { Engine.stopAll(this) })
+        bar.setOnClickListener { openNowPlaying() }
+        bar.visibility = View.GONE
+        return bar
+    }
+
+    // ---------- Home ----------
     private fun showHome() {
         inSettings = false
-        if (hasPerm()) loadMedia()
+        if (hasPerm() && dirty) {
+            loadMedia()
+            dirty = false
+        }
         val tc = Prefs.text(this)
         val ac = Prefs.accent(this)
         frame.removeAllViews()
@@ -506,25 +701,38 @@ class MainActivity : Activity() {
 
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
-        root.setPadding(dp(12), dp(32), dp(12), 0)
+        root.setPadding(dp(12), dp(32), dp(12), dp(8))
 
         val head = LinearLayout(this)
         head.gravity = Gravity.CENTER_VERTICAL
-        val brand = TextView(this)
-        brand.text = "⚡ RajPlayer Pro"
-        brand.textSize = 22f
-        brand.setTextColor(ac)
-        brand.setTypeface(null, android.graphics.Typeface.BOLD)
-        head.addView(brand, LinearLayout.LayoutParams(0, WC, 1f))
-
-        head.addView(sym("\uD83D\uDD0D", tc) {
-            searchOn = !searchOn
-            if (!searchOn) query = ""
-            showHome()
-        })
-        head.addView(sym("\uD83C\uDF10", tc) { streamDialog() })
-        head.addView(sym("\uD83D\uDCC2", tc) { openFile() })
-        head.addView(sym("\u2699", tc) { showSettings() })
+        if (selectMode) {
+            head.addView(sym("\u2715", tc) { exitSelect() })
+            val cnt = TextView(this)
+            cnt.text = selected.size.toString() + " selected"
+            cnt.textSize = 17f
+            cnt.setTextColor(tc)
+            selCountTv = cnt
+            head.addView(cnt, LinearLayout.LayoutParams(0, WC, 1f))
+            head.addView(sym("\u2611", tc) { selectAll() })
+            head.addView(sym("\u2B50", tc) { favSelected() })
+            head.addView(sym("\uD83D\uDDD1", Color.parseColor("#FF5252")) { confirmDelete() })
+        } else {
+            selCountTv = null
+            val brand = TextView(this)
+            brand.text = "\u26A1 RajPlayer Pro"
+            brand.textSize = 22f
+            brand.setTextColor(ac)
+            brand.setTypeface(null, android.graphics.Typeface.BOLD)
+            head.addView(brand, LinearLayout.LayoutParams(0, WC, 1f))
+            head.addView(sym("\uD83D\uDD0D", tc) {
+                searchOn = !searchOn
+                if (!searchOn) query = ""
+                showHome()
+            })
+            head.addView(sym("\uD83C\uDF10", tc) { streamDialog() })
+            head.addView(sym("\uD83D\uDCC2", tc) { openFile() })
+            head.addView(sym("\u2699", tc) { showSettings() })
+        }
         root.addView(head)
 
         val navRow = LinearLayout(this)
@@ -564,6 +772,7 @@ class MainActivity : Activity() {
                     query = s?.toString() ?: ""
                     renderList()
                 }
+
                 override fun beforeTextChanged(s: CharSequence?, st: Int, c: Int, a: Int) {}
                 override fun onTextChanged(s: CharSequence?, st: Int, b: Int, c: Int) {}
             })
@@ -571,8 +780,15 @@ class MainActivity : Activity() {
         }
 
         listHolder = FrameLayout(this)
-        root.addView(listHolder, LinearLayout.LayoutParams(MP, MP))
+        root.addView(listHolder, LinearLayout.LayoutParams(MP, 0, 1f))
+
+        miniBar = buildMini(tc, ac)
+        val mlp = LinearLayout.LayoutParams(MP, WC)
+        mlp.setMargins(0, dp(6), 0, 0)
+        root.addView(miniBar, mlp)
+
         renderList()
+        refreshMini()
         frame.addView(root, FrameLayout.LayoutParams(MP, MP))
     }
 
@@ -596,68 +812,76 @@ class MainActivity : Activity() {
         val items = ArrayList<Item>()
         val of = openFolder
         val q = query.trim().lowercase()
-
         val activeList = if (tab == 2) audios else videos
 
         if (q.isNotEmpty()) {
-            shown = activeList.filter { it.name.lowercase().contains(q) }
+            shown = (videos + audios).filter { it.name.lowercase().contains(q) }
             for (v in shown) {
-                items.add(Item(v.name, folderName(v.folder) + " • " + sizeStr(v.size), v.uri, durStr(v.dur), "V"))
+                items.add(Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), if (isAudio(v.uri)) "\uD83C\uDFB5" else "V"))
             }
         } else if (tab == 3) {
             val favSet = Prefs.favs(this)
             shown = videos.filter { favSet.contains(it.uri.toString()) } + audios.filter { favSet.contains(it.uri.toString()) }
             for (v in shown) {
-                items.add(Item(v.name, folderName(v.folder) + " • " + sizeStr(v.size), v.uri, durStr(v.dur), "⭐"))
+                items.add(Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), "\u2B50"))
             }
         } else if (tab == 2) {
             shown = audios
             for (v in shown) {
-                items.add(Item(v.name, folderName(v.folder) + " • " + sizeStr(v.size), v.uri, durStr(v.dur), "🎵"))
+                items.add(Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), "\uD83C\uDFB5"))
             }
         } else if (tab == 0 || of != null) {
-            shown = if (of != null) videos.filter { it.folder == of } else videos
+            shown = if (of != null) activeList.filter { it.folder == of } else activeList
             for (v in shown) {
-                items.add(Item(v.name, folderName(v.folder) + " • " + sizeStr(v.size), v.uri, durStr(v.dur), "V"))
+                items.add(Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), "V"))
             }
         } else {
             val groups = videos.groupBy { it.folder }
             val keys = groups.keys.sortedBy { folderName(it).lowercase() }
             for (k in keys) {
                 val l = groups[k] ?: continue
-                items.add(Item(folderName(k), "${l.size} videos", l[0].uri, "${l.size}", "F:$k"))
+                items.add(Item(folderName(k), l.size.toString() + " videos", l[0].uri, l.size.toString(), "F:" + k))
             }
         }
 
         if (items.isEmpty()) {
-            val emptyMsg = if (tab == 3) "No favorite items in Playlist yet! Long press any item to add." else "No items found."
+            val emptyMsg = if (tab == 3) "Playlist abhi khali hai. Kisi item ko long press karke tick karo, phir \u2B50 dabao." else "No items found."
             listHolder.addView(label(emptyMsg, 15f, tc))
             return
         }
 
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
-        if (of != null && q.isEmpty()) col.addView(label("📁 " + folderName(of), 15f, tc))
+        if (of != null && q.isEmpty() && tab != 2 && tab != 3) col.addView(label("\uD83D\uDCC1 " + folderName(of), 15f, tc))
 
         val lv = ListView(this)
         lv.divider = null
-        lv.adapter = makeAdapter(items, tc)
+        val ad = makeAdapter(items, tc, ac)
+        curAdapter = ad
+        lv.adapter = ad
         lv.setOnItemClickListener { _, _, i, _ ->
             val chosen = items[i]
             if (chosen.tag.startsWith("F:")) {
-                openFolder = chosen.tag.substring(2)
-                showHome()
+                if (!selectMode) {
+                    openFolder = chosen.tag.substring(2)
+                    showHome()
+                }
+            } else if (selectMode) {
+                toggleSel(chosen.uri)
             } else {
                 playList(shown, shown.indexOfFirst { it.uri == chosen.uri })
             }
         }
-        lv.onItemLongClickListener = android.widget.AdapterView.OnItemLongClickListener { _, _, i, _ ->
+        lv.onItemLongClickListener = AdapterView.OnItemLongClickListener { _, _, i, _ ->
             val chosen = items[i]
-            val u = chosen.uri
-            if (u != null) {
-                val isNowFav = Prefs.toggleFav(this@MainActivity, u.toString())
-                if (isNowFav) toast("Added to Playlist ⭐") else toast("Removed from Playlist")
-                showHome()
+            if (!chosen.tag.startsWith("F:") && chosen.uri != null) {
+                if (!selectMode) {
+                    selectMode = true
+                    selected.add(chosen.uri.toString())
+                    showHome()
+                } else {
+                    toggleSel(chosen.uri)
+                }
             }
             true
         }
@@ -665,6 +889,7 @@ class MainActivity : Activity() {
         listHolder.addView(col, FrameLayout.LayoutParams(MP, MP))
     }
 
+    // ---------- Settings ----------
     private fun applyPreset(bg: String, tx: String, ac: String) {
         Prefs.setBg(this, Color.parseColor(bg))
         Prefs.setText(this, Color.parseColor(tx))
@@ -726,8 +951,15 @@ class MainActivity : Activity() {
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.setPadding(dp(16), dp(40), dp(16), dp(24))
-        root.addView(label("⚙️ Ultra Settings", 24f, tc))
-        root.addView(button("← Back to Player", ac) { showHome() })
+        root.addView(label("\u2699\uFE0F Ultra Settings", 24f, tc))
+        root.addView(button("\u2190 Back", ac) { showHome() })
+
+        root.addView(label("Video Background Audio", 15f, tc))
+        root.addView(button("Background Audio: " + (if (Prefs.bgAudio(this)) "ON" else "OFF"), ac) {
+            Prefs.setBgAudio(this, !Prefs.bgAudio(this))
+            Engine.bgAudio = Prefs.bgAudio(this)
+            showSettings()
+        })
 
         root.addView(label("Manual Double-Tap Seek Time", 15f, tc))
         val seekSecs = intArrayOf(5, 10, 15, 20, 30)
