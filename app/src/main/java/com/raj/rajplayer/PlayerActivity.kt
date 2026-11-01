@@ -572,7 +572,6 @@ class PlayerActivity : Activity() {
 
         setContentView(root)
 
-        // ---- player ab Engine ka hai, yahan sirf screen jodte hain ----
         try {
             mp.detachViews()
         } catch (e: Exception) {
@@ -659,7 +658,6 @@ class PlayerActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        // video screen par hain to notification ki zaroorat nahi
         PlaybackService.stop(this)
     }
 

@@ -126,7 +126,6 @@ class AudioActivity : Activity() {
         col.gravity = Gravity.CENTER_HORIZONTAL
         col.setPadding(dp(24), dp(36), dp(24), dp(16))
 
-        // ---- top row ----
         val top = LinearLayout(this)
         top.gravity = Gravity.CENTER_VERTICAL
         top.addView(ib("\u2190", 24f, tc) { finish() })
@@ -143,7 +142,6 @@ class AudioActivity : Activity() {
         })
         col.addView(top, LinearLayout.LayoutParams(MP, WC))
 
-        // ---- album art ----
         val artSize = Math.min(resources.displayMetrics.widthPixels - dp(64), dp(340))
         val artBox = FrameLayout(this)
         val g = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(ac, 0xFF000000.toInt()))
@@ -166,7 +164,6 @@ class AudioActivity : Activity() {
         alp.setMargins(0, dp(20), 0, dp(20))
         col.addView(artBox, alp)
 
-        // ---- title ----
         titleTv = TextView(this)
         titleTv.textSize = 20f
         titleTv.setTextColor(tc)
@@ -182,7 +179,6 @@ class AudioActivity : Activity() {
         subTv.setPadding(0, dp(4), 0, dp(12))
         col.addView(subTv, LinearLayout.LayoutParams(MP, WC))
 
-        // ---- seek ----
         val seekRow = LinearLayout(this)
         seekRow.gravity = Gravity.CENTER_VERTICAL
         curTv = TextView(this)
@@ -215,7 +211,6 @@ class AudioActivity : Activity() {
         seekRow.addView(durTv)
         col.addView(seekRow, LinearLayout.LayoutParams(MP, WC))
 
-        // ---- transport ----
         val tr = LinearLayout(this)
         tr.gravity = Gravity.CENTER
         shufBtn = ib("\uD83D\uDD00", 22f, tc) {
@@ -240,7 +235,6 @@ class AudioActivity : Activity() {
         tr.addView(repBtn)
         col.addView(tr, LinearLayout.LayoutParams(MP, WC))
 
-        // ---- extras ----
         val ex = LinearLayout(this)
         ex.gravity = Gravity.CENTER
         ex.setPadding(0, dp(12), 0, 0)

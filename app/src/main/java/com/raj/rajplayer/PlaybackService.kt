@@ -12,6 +12,7 @@ import android.graphics.drawable.Icon
 import android.media.MediaMetadata
 import android.media.session.MediaSession
 import android.media.session.PlaybackState
+import android.os.Build
 import android.os.IBinder
 
 class PlaybackService : Service() {
@@ -106,7 +107,11 @@ class PlaybackService : Service() {
     fun refresh() {
         updateSession()
         try {
-            startForeground(NID, build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            if (Build.VERSION.SDK_INT >= 34) {
+                startForeground(NID, build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
+            } else {
+                startForeground(NID, build())
+            }
         } catch (e: Exception) {
         }
         if (!Engine.active) {

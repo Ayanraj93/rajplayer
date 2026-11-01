@@ -145,7 +145,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---------- helpers ----------
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun perm(): String =
@@ -156,7 +155,6 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO
         else Manifest.permission.READ_EXTERNAL_STORAGE
 
-    // video YA audio me se koi ek mil jaye to bhi list dikhao
     private fun hasPerm() =
         checkSelfPermission(perm()) == PackageManager.PERMISSION_GRANTED ||
                 checkSelfPermission(audioPerm()) == PackageManager.PERMISSION_GRANTED
@@ -257,7 +255,6 @@ class MainActivity : Activity() {
         return if (s.isEmpty()) "Internal Storage" else s
     }
 
-    // ---------- media load ----------
     private fun loadMedia() {
         val vList = ArrayList<V>()
         val vBase = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
@@ -338,7 +335,6 @@ class MainActivity : Activity() {
         return if (asc) sorted else sorted.reversed()
     }
 
-    // ---------- play ----------
     private fun playList(list: List<V>, index: Int) {
         if (index < 0 || index >= list.size) return
         val cur = list[index]
@@ -403,7 +399,6 @@ class MainActivity : Activity() {
             .show()
     }
 
-    // ---------- select + delete ----------
     private fun toggleSel(u: Uri?) {
         if (u == null) return
         val k = u.toString()
@@ -480,7 +475,6 @@ class MainActivity : Activity() {
         showHome()
     }
 
-    // ---------- sort dialog ----------
     private fun sortDialog() {
         val modes = arrayOf("Date Added", "File Name", "File Size", "Length")
         val orders = arrayOf("New to Old", "Old to New")
@@ -546,7 +540,6 @@ class MainActivity : Activity() {
             .show()
     }
 
-    // ---------- rows ----------
     private fun makeRow(): Pair<View, H> {
         val row = LinearLayout(this)
         row.gravity = Gravity.CENTER_VERTICAL
@@ -649,7 +642,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // ---------- mini player ----------
     private fun refreshMini() {
         if (!::miniBar.isInitialized) return
         if (!Engine.active || inSettings) {
@@ -686,7 +678,6 @@ class MainActivity : Activity() {
         return bar
     }
 
-    // ---------- Home ----------
     private fun showHome() {
         inSettings = false
         if (hasPerm() && dirty) {
@@ -889,7 +880,6 @@ class MainActivity : Activity() {
         listHolder.addView(col, FrameLayout.LayoutParams(MP, MP))
     }
 
-    // ---------- Settings ----------
     private fun applyPreset(bg: String, tx: String, ac: String) {
         Prefs.setBg(this, Color.parseColor(bg))
         Prefs.setText(this, Color.parseColor(tx))
@@ -985,7 +975,7 @@ class MainActivity : Activity() {
         thr.addView(button("Cyber Dark", ac) { applyPreset("#0B0F14", "#FFFFFF", "#00E676") })
         thr.addView(button("OLED Black", ac) { applyPreset("#000000", "#FFFFFF", "#00E5FF") })
         thr.addView(button("Royal Blue", ac) { applyPreset("#0D1B2A", "#E0E1DD", "#448AFF") })
-        thr.addView(button("Deep Purple", ac) { applyPreset("#1A122B", "#FFFFFF", "#E040FB") })
+        thr.addView(button("Deep Purple", ac) { applyPreset("#1A122B", #FFFFFF", "#E040FB") })
         thr.addView(button("Clean Light", ac) { applyPreset("#F5F7FA", "#111111", "#2979FF") })
         ths.addView(thr)
         root.addView(ths)

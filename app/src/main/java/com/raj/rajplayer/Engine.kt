@@ -256,9 +256,7 @@ object Engine {
     }
 }
 
-// Equalizer / Boost / Sleep dialogs: Audio aur Video dono screen me kaam aate hain
 object Dialogs {
-
     fun eq(a: Activity) {
         val p = Engine.mp ?: return
         val n = MediaPlayer.Equalizer.getPresetCount()
