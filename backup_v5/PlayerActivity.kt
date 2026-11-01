@@ -15,8 +15,6 @@ import android.net.Uri
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.ParcelFileDescriptor
-import android.provider.OpenableColumns
 import android.text.TextUtils
 import android.util.Rational
 import android.view.GestureDetector
@@ -32,8 +30,6 @@ import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import java.io.File
-import org.videolan.libvlc.LibVLC
-import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.util.VLCVideoLayout
 
@@ -42,8 +38,8 @@ class PlayerActivity : Activity() {
     private val MP = ViewGroup.LayoutParams.MATCH_PARENT
     private val WC = ViewGroup.LayoutParams.WRAP_CONTENT
 
-    private lateinit var vlc: LibVLC
-    private lateinit var mp: MediaPlayer
+    private val mp: MediaPlayer get() = Engine.mp!!
+
     private lateinit var layout: VLCVideoLayout
     private lateinit var touchView: View
     private lateinit var topBar: LinearLayout
@@ -58,16 +54,10 @@ class PlayerActivity : Activity() {
     private lateinit var fitBtn: TextView
     private lateinit var audioMgr: AudioManager
 
-    private var pfd: ParcelFileDescriptor? = null
     private val ui = Handler(Looper.getMainLooper())
 
-    private var items: List<Uri> = emptyList()
-    private var idx = 0
     private var locked = false
-    private var ended = false
     private var userSeeking = false
-    private var resumeTo = 0L
-    private var bgAudio = false
     private var videoPortrait = false
     private var abA = -1L
     private var abB = -1L
@@ -93,30 +83,30 @@ class PlayerActivity : Activity() {
 
     private val hideRun = Runnable { hideControls() }
     private val hideMsg = Runnable { msgTv.visibility = View.GONE }
-    private val sleepRun = Runnable {
-        if (mp.isPlaying) mp.pause()
-        saveProgress()
-        showMsg("Sleep Timer: Playback Paused")
+
+    private val lis = object : Engine.Listener {
+        override fun onItemChanged() {
+            runOnUiThread { onItem() }
+        }
     }
 
     private val tick = object : Runnable {
         override fun run() {
-            val len = mp.getLength()
-            val t = mp.getTime()
-            if (len > 0) {
-                if (resumeTo > 0) {
-                    mp.setTime(resumeTo)
-                    resumeTo = 0
+            val p = Engine.mp
+            if (p != null) {
+                val len = p.getLength()
+                val t = p.getTime()
+                if (len > 0) {
+                    if (!userSeeking) {
+                        seek.max = len.toInt()
+                        seek.progress = t.toInt()
+                    }
+                    durTv.text = fmt(len)
                 }
-                if (!userSeeking) {
-                    seek.max = len.toInt()
-                    seek.progress = t.toInt()
-                }
-                durTv.text = fmt(len)
+                if (abA >= 0 && abB > abA && t >= abB) p.setTime(abA)
+                if (!userSeeking) curTv.text = fmt(t)
+                playBtn.text = if (p.isPlaying) "\u23F8" else "\u25B6"
             }
-            if (abA >= 0 && abB > abA && t >= abB) mp.setTime(abA)
-            if (!userSeeking) curTv.text = fmt(t)
-            playBtn.text = if (mp.isPlaying) "⏸" else "▶"
             ui.postDelayed(this, 500)
         }
     }
@@ -186,19 +176,6 @@ class PlayerActivity : Activity() {
 
     private fun controlsVisible() = lockBtn.visibility == View.VISIBLE
 
-    private fun nameOf(u: Uri): String {
-        try {
-            contentResolver.query(u, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use { c ->
-                if (c.moveToFirst()) {
-                    val n = c.getString(0)
-                    if (n != null) return n
-                }
-            }
-        } catch (e: Exception) {
-        }
-        return u.lastPathSegment ?: "Media"
-    }
-
     private fun applyOrientation(uri: Uri) {
         var o = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
         videoPortrait = false
@@ -224,63 +201,19 @@ class PlayerActivity : Activity() {
         requestedOrientation = o
     }
 
-    private fun saveProgress() {
-        if (!::mp.isInitialized || items.isEmpty()) return
-        val len = mp.getLength()
-        val t = mp.getTime()
-        val key = items[idx].toString()
-        if (len > 0 && t > 5000 && t < len - 5000) Prefs.setPos(this, key, t) else Prefs.setPos(this, key, 0L)
-    }
-
-    private fun loadAt(i: Int) {
-        saveProgress()
-        idx = i
+    private fun onItem() {
+        if (!Engine.active) {
+            finish()
+            return
+        }
+        titleTv.text = Engine.title
         abA = -1L
         abB = -1L
-        val uri = items[i]
-        titleTv.text = nameOf(uri)
-        resumeTo = Prefs.pos(this, uri.toString())
-        applyOrientation(uri)
-        val oldPfd = pfd
-        try {
-            val media: Media
-            if (uri.scheme == "content") {
-                pfd = contentResolver.openFileDescriptor(uri, "r")
-                media = Media(vlc, pfd!!.fileDescriptor)
-            } else {
-                pfd = null
-                media = Media(vlc, uri)
-            }
-            media.setHWDecoderEnabled(Prefs.hw(this), false)
-            mp.setMedia(media)
-            media.release()
-            mp.play()
-            ended = false
-        } catch (e: Exception) {
-            Toast.makeText(this, "Failed to open file: " + e.message, Toast.LENGTH_LONG).show()
-        }
-        try {
-            oldPfd?.close()
-        } catch (e: Exception) {
-        }
-    }
-
-    private fun onEnded() {
-        Prefs.setPos(this, items[idx].toString(), 0L)
-        if (idx + 1 < items.size) {
-            loadAt(idx + 1)
-        } else {
-            ended = true
-            showControls()
-        }
+        applyOrientation(Engine.cur())
     }
 
     private fun togglePlay() {
-        if (ended) {
-            loadAt(idx)
-            return
-        }
-        if (mp.isPlaying) mp.pause() else mp.play()
+        Engine.toggle(this)
         showControls()
     }
 
@@ -313,83 +246,40 @@ class PlayerActivity : Activity() {
         else if (abB < 0) "A-B Repeat: Set Point B"
         else "Disable A-B Repeat"
         val opts = arrayOf(
-            "🎚️ Equalizer Presets",
-            "🔊 Audio Boost (Up to 200%)",
-            "⏱️ Sleep Timer",
-            "📂 Load External Subtitle",
-            "🔖 Add Bookmark",
-            "📑 View Bookmarks",
+            "\uD83C\uDF9A\uFE0F Equalizer Presets",
+            "\uD83D\uDD0A Audio Boost (Up to 200%)",
+            "\u23F1\uFE0F Sleep Timer",
+            "\uD83D\uDCC2 Load External Subtitle",
+            "\uD83D\uDD16 Add Bookmark",
+            "\uD83D\uDCD1 View Bookmarks",
             abLabel,
-            "🎵 Background Audio: " + (if (bgAudio) "ON" else "OFF"),
-            "⚡ Hardware Decoder: " + (if (Prefs.hw(this)) "ON" else "OFF"),
-            "🔲 Picture-in-Picture (PiP)"
+            "\uD83C\uDFB5 Background Audio: " + (if (Engine.bgAudio) "ON" else "OFF"),
+            "\u26A1 Hardware Decoder: " + (if (Prefs.hw(this)) "ON" else "OFF"),
+            "\uD83D\uDD32 Picture-in-Picture (PiP)"
         )
         AlertDialog.Builder(this)
-            .setTitle("⚡ Ultra Options")
+            .setTitle("\u26A1 Ultra Options")
             .setItems(opts) { _, i ->
                 when (i) {
-                    0 -> eqDialog()
-                    1 -> boostDialog()
-                    2 -> sleepDialog()
+                    0 -> Dialogs.eq(this)
+                    1 -> Dialogs.boost(this)
+                    2 -> Dialogs.sleep(this)
                     3 -> pickSub()
                     4 -> addBookmark()
                     5 -> bookmarksDialog()
                     6 -> abStep()
                     7 -> {
-                        bgAudio = !bgAudio
-                        showMsg("Background Audio " + (if (bgAudio) "ON" else "OFF"))
+                        Engine.bgAudio = !Engine.bgAudio
+                        Prefs.setBgAudio(this, Engine.bgAudio)
+                        showMsg("Background Audio " + (if (Engine.bgAudio) "ON" else "OFF"))
                     }
                     8 -> {
                         Prefs.setHw(this, !Prefs.hw(this))
-                        loadAt(idx)
+                        Engine.loadAt(this, Engine.idx)
                         showMsg("HW Decoder " + (if (Prefs.hw(this)) "ON" else "OFF"))
                     }
                     9 -> enterPip()
                     else -> {}
-                }
-            }
-            .show()
-    }
-
-    private fun eqDialog() {
-        val n = MediaPlayer.Equalizer.getPresetCount()
-        val names = ArrayList<String>()
-        names.add("Normal / Off")
-        for (k in 0 until n) names.add(MediaPlayer.Equalizer.getPresetName(k))
-        AlertDialog.Builder(this)
-            .setTitle("Equalizer Presets")
-            .setItems(names.toTypedArray()) { _, i ->
-                if (i == 0) mp.setEqualizer(null)
-                else mp.setEqualizer(MediaPlayer.Equalizer.createFromPreset(i - 1))
-                showMsg("Equalizer: " + names[i])
-            }
-            .show()
-    }
-
-    private fun boostDialog() {
-        val vals = intArrayOf(100, 125, 150, 175, 200)
-        val names = arrayOf("100% (Normal)", "125%", "150%", "175%", "200% (Max Boost)")
-        AlertDialog.Builder(this)
-            .setTitle("Audio Volume Boost")
-            .setItems(names) { _, i ->
-                mp.setVolume(vals[i])
-                showMsg("Audio Boost set to " + vals[i] + "%")
-            }
-            .show()
-    }
-
-    private fun sleepDialog() {
-        val mins = intArrayOf(0, 15, 30, 45, 60, 90)
-        val names = arrayOf("Off", "15 mins", "30 mins", "45 mins", "60 mins", "90 mins")
-        AlertDialog.Builder(this)
-            .setTitle("Sleep Timer")
-            .setItems(names) { _, i ->
-                ui.removeCallbacks(sleepRun)
-                if (mins[i] > 0) {
-                    ui.postDelayed(sleepRun, mins[i] * 60000L)
-                    showMsg("Sleep Timer set for " + names[i])
-                } else {
-                    showMsg("Sleep Timer Disabled")
                 }
             }
             .show()
@@ -408,7 +298,7 @@ class PlayerActivity : Activity() {
         if (requestCode != 7 || resultCode != RESULT_OK) return
         val u = data?.data ?: return
         try {
-            val nm = nameOf(u)
+            val nm = Engine.nameOf(this, u)
             val ext = nm.substringAfterLast('.', "srt")
             val f = File(cacheDir, "sub_" + System.currentTimeMillis() + "." + ext)
             contentResolver.openInputStream(u)?.use { ins ->
@@ -422,14 +312,14 @@ class PlayerActivity : Activity() {
     }
 
     private fun addBookmark() {
-        val key = items[idx].toString()
+        val key = Engine.cur().toString()
         val t = mp.getTime()
         Prefs.setBms(this, key, (Prefs.bms(this, key) + t).sorted())
         showMsg("Bookmark added at " + fmt(t))
     }
 
     private fun bookmarksDialog() {
-        val key = items[idx].toString()
+        val key = Engine.cur().toString()
         val l = Prefs.bms(this, key)
         if (l.isEmpty()) {
             Toast.makeText(this, "No bookmarks saved for this media", Toast.LENGTH_SHORT).show()
@@ -478,7 +368,7 @@ class PlayerActivity : Activity() {
 
     override fun onUserLeaveHint() {
         super.onUserLeaveHint()
-        if (::mp.isInitialized && mp.isPlaying && !locked && !bgAudio) enterPip()
+        if (Engine.mp != null && Engine.isPlaying() && !locked && !Engine.bgAudio) enterPip()
     }
 
     override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
@@ -497,14 +387,25 @@ class PlayerActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val u0 = intent.data
-        if (u0 == null) {
-            finish()
-            return
+        val cont = intent.getBooleanExtra("cont", false) && Engine.active && Engine.isVideo
+        var uris: List<Uri> = emptyList()
+        var names: List<String> = emptyList()
+        var index = 0
+        if (!cont) {
+            val u0 = intent.data
+            if (u0 == null) {
+                finish()
+                return
+            }
+            val l = intent.getStringArrayListExtra("list")
+            uris = if (l != null && l.isNotEmpty()) l.map { Uri.parse(it) } else listOf(u0)
+            val nm = intent.getStringArrayListExtra("names")
+            names = if (nm != null && nm.size == uris.size) nm.toList() else emptyList()
+            index = intent.getIntExtra("idx", 0)
         }
-        val l = intent.getStringArrayListExtra("list")
-        items = if (l != null && l.isNotEmpty()) l.map { Uri.parse(it) } else listOf(u0)
-        idx = intent.getIntExtra("idx", 0).coerceIn(0, items.size - 1)
+
+        Engine.ensure(this)
+        Engine.bgAudio = Prefs.bgAudio(this)
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         hideBars()
@@ -535,14 +436,14 @@ class PlayerActivity : Activity() {
         topBar.gravity = Gravity.CENTER_VERTICAL
         topBar.setBackgroundColor(0x99000000.toInt())
         topBar.setPadding(dp(20), dp(8), dp(20), dp(8))
-        topBar.addView(ib("←", 22f) { finish() })
+        topBar.addView(ib("\u2190", 22f) { finish() })
         titleTv = TextView(this)
         titleTv.setTextColor(Color.WHITE)
         titleTv.textSize = 15f
         titleTv.maxLines = 1
         titleTv.ellipsize = TextUtils.TruncateAt.END
         topBar.addView(titleTv, LinearLayout.LayoutParams(0, WC, 1f))
-        topBar.addView(ib("🔄", 20f) {
+        topBar.addView(ib("\uD83D\uDD04", 20f) {
             requestedOrientation =
                 if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
                     ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
@@ -573,10 +474,12 @@ class PlayerActivity : Activity() {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
                 if (fromUser) curTv.text = fmt(p.toLong())
             }
+
             override fun onStartTrackingTouch(s: SeekBar?) {
                 userSeeking = true
                 ui.removeCallbacks(hideRun)
             }
+
             override fun onStopTrackingTouch(s: SeekBar?) {
                 mp.setTime((s?.progress ?: 0).toLong())
                 userSeeking = false
@@ -590,11 +493,15 @@ class PlayerActivity : Activity() {
 
         val trRow = LinearLayout(this)
         trRow.gravity = Gravity.CENTER
-        trRow.addView(ib("⏮", 22f) {
-            if (idx > 0) loadAt(idx - 1) else Toast.makeText(this, "First item", Toast.LENGTH_SHORT).show()
+        trRow.addView(ib("\u23EE", 22f) {
+            if (Engine.idx > 0) Engine.loadAt(this, Engine.idx - 1)
+            else Toast.makeText(this, "First item", Toast.LENGTH_SHORT).show()
         })
-        trRow.addView(ib("-${Prefs.seekSec(this)}s", 15f) { seekBy((-Prefs.seekSec(this) * 1000).toLong()); showControls() })
-        playBtn = ib("⏸", 24f) { togglePlay() }
+        trRow.addView(ib("-${Prefs.seekSec(this)}s", 15f) {
+            seekBy((-Prefs.seekSec(this) * 1000).toLong())
+            showControls()
+        })
+        playBtn = ib("\u23F8", 24f) { togglePlay() }
         val circle = GradientDrawable()
         circle.shape = GradientDrawable.OVAL
         circle.setColor(ac)
@@ -603,9 +510,13 @@ class PlayerActivity : Activity() {
         val plp = LinearLayout.LayoutParams(dp(54), dp(54))
         plp.setMargins(dp(12), 0, dp(12), 0)
         trRow.addView(playBtn, plp)
-        trRow.addView(ib("+${Prefs.seekSec(this)}s", 15f) { seekBy((Prefs.seekSec(this) * 1000).toLong()); showControls() })
-        trRow.addView(ib("⏭", 22f) {
-            if (idx + 1 < items.size) loadAt(idx + 1) else Toast.makeText(this, "Last item", Toast.LENGTH_SHORT).show()
+        trRow.addView(ib("+${Prefs.seekSec(this)}s", 15f) {
+            seekBy((Prefs.seekSec(this) * 1000).toLong())
+            showControls()
+        })
+        trRow.addView(ib("\u23ED", 22f) {
+            if (Engine.idx + 1 < Engine.items.size) Engine.loadAt(this, Engine.idx + 1)
+            else Toast.makeText(this, "Last item", Toast.LENGTH_SHORT).show()
         })
         controls.addView(trRow)
 
@@ -630,16 +541,16 @@ class PlayerActivity : Activity() {
         exRow.addView(ib("Sub", 14f) {
             pickTrack("Subtitles", mp.getSpuTracks()) { id -> mp.setSpuTrack(id) }
         })
-        exRow.addView(ib("⚙️", 18f) { showMenu() })
+        exRow.addView(ib("\u2699\uFE0F", 18f) { showMenu() })
         controls.addView(exRow)
         root.addView(controls, FrameLayout.LayoutParams(MP, WC, Gravity.BOTTOM))
 
-        lockBtn = ib("🔓", 22f) { b ->
+        lockBtn = ib("\uD83D\uDD13", 22f) { b ->
             if (locked) {
                 showMsg("Long press to unlock screen")
             } else {
                 locked = true
-                b.text = "🔒"
+                b.text = "\uD83D\uDD12"
                 topBar.visibility = View.GONE
                 controls.visibility = View.GONE
                 showMsg("Screen Locked")
@@ -649,7 +560,7 @@ class PlayerActivity : Activity() {
         lockBtn.setOnLongClickListener {
             if (locked) {
                 locked = false
-                lockBtn.text = "🔓"
+                lockBtn.text = "\uD83D\uDD13"
                 showMsg("Screen Unlocked")
                 showControls()
             }
@@ -661,14 +572,13 @@ class PlayerActivity : Activity() {
 
         setContentView(root)
 
-        vlc = LibVLC(this)
-        mp = MediaPlayer(vlc)
-        mp.attachViews(layout, null, true, false)
-        mp.setEventListener { ev ->
-            if (ev.type == MediaPlayer.Event.EndReached) {
-                runOnUiThread { onEnded() }
-            }
+        // ---- player ab Engine ka hai, yahan sirf screen jodte hain ----
+        try {
+            mp.detachViews()
+        } catch (e: Exception) {
         }
+        mp.attachViews(layout, null, true, false)
+        Engine.listener = lis
 
         val scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
             override fun onScale(detector: ScaleGestureDetector): Boolean {
@@ -724,12 +634,12 @@ class PlayerActivity : Activity() {
                     val lp = window.attributes
                     lp.screenBrightness = brightCur
                     window.attributes = lp
-                    showMsg("☀️ " + Math.round(brightCur * 100) + "%")
+                    showMsg("\u2600\uFE0F " + Math.round(brightCur * 100) + "%")
                 } else if (gMode == 2) {
                     volCur = (volCur + dy / hgt * 1.5f).coerceIn(0f, 1f)
                     val mx = audioMgr.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
                     audioMgr.setStreamVolume(AudioManager.STREAM_MUSIC, Math.round(volCur * mx), 0)
-                    showMsg("🔊 " + Math.round(volCur * 100) + "%")
+                    showMsg("\uD83D\uDD0A " + Math.round(volCur * 100) + "%")
                 }
                 return true
             }
@@ -742,47 +652,40 @@ class PlayerActivity : Activity() {
             true
         }
 
-        loadAt(idx)
+        if (!cont) Engine.setQueue(this, uris, names, index, true) else onItem()
         showControls()
         ui.post(tick)
     }
 
     override fun onResume() {
         super.onResume()
-        stopService(Intent(this, PlaybackService::class.java))
+        // video screen par hain to notification ki zaroorat nahi
+        PlaybackService.stop(this)
     }
 
     override fun onPause() {
         super.onPause()
-        saveProgress()
-        if (::mp.isInitialized && bgAudio && mp.isPlaying) {
-            try {
-                startForegroundService(
-                    Intent(this, PlaybackService::class.java).putExtra("title", titleTv.text.toString())
-                )
-            } catch (e: Exception) {
-            }
-        }
+        Engine.saveProgress()
+        if (Engine.bgAudio && Engine.isPlaying()) PlaybackService.start(this)
     }
 
     override fun onStop() {
         super.onStop()
-        if (::mp.isInitialized && !bgAudio && mp.isPlaying) mp.pause()
+        if (!Engine.bgAudio && Engine.isPlaying()) Engine.pause()
     }
 
     override fun onDestroy() {
         super.onDestroy()
         ui.removeCallbacksAndMessages(null)
-        stopService(Intent(this, PlaybackService::class.java))
-        if (::mp.isInitialized) {
-            mp.stop()
-            mp.detachViews()
-            mp.release()
-        }
-        if (::vlc.isInitialized) vlc.release()
+        if (Engine.listener === lis) Engine.listener = null
         try {
-            pfd?.close()
+            Engine.mp?.detachViews()
         } catch (e: Exception) {
+        }
+        if (!Engine.bgAudio) {
+            Engine.stopAll(this)
+        } else if (Engine.active && Engine.isPlaying()) {
+            PlaybackService.start(this)
         }
     }
 }
