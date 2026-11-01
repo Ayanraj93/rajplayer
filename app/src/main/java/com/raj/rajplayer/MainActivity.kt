@@ -975,7 +975,7 @@ class MainActivity : Activity() {
         thr.addView(button("Cyber Dark", ac) { applyPreset("#0B0F14", "#FFFFFF", "#00E676") })
         thr.addView(button("OLED Black", ac) { applyPreset("#000000", "#FFFFFF", "#00E5FF") })
         thr.addView(button("Royal Blue", ac) { applyPreset("#0D1B2A", "#E0E1DD", "#448AFF") })
-        thr.addView(button("Deep Purple", ac) { applyPreset("#1A122B", #FFFFFF", "#E040FB") })
+        thr.addView(button("Deep Purple", ac) { applyPreset("#1A122B", "#FFFFFF", "#E040FB") })
         thr.addView(button("Clean Light", ac) { applyPreset("#F5F7FA", "#111111", "#2979FF") })
         ths.addView(thr)
         root.addView(ths)
