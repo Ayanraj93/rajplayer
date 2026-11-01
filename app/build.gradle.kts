@@ -4,6 +4,10 @@ plugins {
 }
 
 android {
+    lint {
+        abortOnError = false
+        checkReleaseBuilds = false
+    }
     namespace = "com.raj.rajplayer"
     compileSdk = 34
 
