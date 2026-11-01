@@ -250,7 +250,7 @@ object Engine {
                     .build()
                 focusReq = r
             }
-            am.requestAudioFocus(r)
+            am.requestAudioFocus(r!!)
         } catch (e: Exception) {
         }
     }
