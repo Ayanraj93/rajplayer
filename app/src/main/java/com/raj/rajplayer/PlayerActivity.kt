@@ -387,6 +387,7 @@ class PlayerActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Cutout.enable(this)
         val cont = intent.getBooleanExtra("cont", false) && Engine.active && Engine.isVideo
         var uris: List<Uri> = emptyList()
         var names: List<String> = emptyList()
@@ -571,6 +572,7 @@ class PlayerActivity : Activity() {
         root.addView(lockBtn, llp)
 
         setContentView(root)
+        Cutout.padControls(root, topBar, controls, lockBtn)
 
         try {
             mp.detachViews()
