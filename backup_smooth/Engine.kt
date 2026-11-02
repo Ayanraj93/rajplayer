@@ -47,7 +47,12 @@ object Engine {
         app = ctx.applicationContext
         val existing = mp
         if (existing != null) return existing
-        val v = LibVLC(app)
+        val opts = ArrayList<String>()
+        opts.add("--file-caching=300")
+        opts.add("--network-caching=1500")
+        opts.add("--clock-jitter=0")
+        opts.add("--clock-synchro=0")
+        val v = LibVLC(app, opts)
         val p = MediaPlayer(v)
         p.setEventListener { ev ->
             val t = ev.type
@@ -172,6 +177,7 @@ object Engine {
         } else {
             requestFocus()
             p.play()
+            resync()
         }
         notifyChanged()
     }
