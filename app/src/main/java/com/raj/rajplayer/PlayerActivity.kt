@@ -209,7 +209,7 @@ class PlayerActivity : Activity() {
         titleTv.text = Engine.title
         abA = -1L
         abB = -1L
-        applyOrientation(Engine.cur())
+        Orient.setFor(this, Engine.cur()) { videoPortrait = it }
     }
 
     private fun togglePlay() {

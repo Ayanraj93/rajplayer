@@ -48,8 +48,8 @@ object Engine {
         val existing = mp
         if (existing != null) return existing
         val opts = ArrayList<String>()
-        opts.add("--file-caching=2000")
-        opts.add("--network-caching=2000")
+        opts.add("--file-caching=300")
+        opts.add("--network-caching=1500")
         opts.add("--clock-jitter=0")
         opts.add("--clock-synchro=0")
         val v = LibVLC(app, opts)
