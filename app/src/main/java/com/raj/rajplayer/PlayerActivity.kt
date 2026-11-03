@@ -536,6 +536,22 @@ class PlayerActivity : Activity() {
             showControls()
         }
         exRow.addView(fitBtn)
+        val repBtn = ib("\uD83D\uDD01", 18f) { b ->
+            showMsg(RepeatUi.cycle(this, b))
+            showControls()
+        }
+        repBtn.setPadding(dp(8), dp(8), dp(8), dp(8))
+        RepeatUi.paint(this, repBtn)
+        exRow.addView(repBtn)
+        val shufBtn = ib("\uD83D\uDD00", 18f) { b ->
+            Prefs.setShuffle(this, !Prefs.shuffle(this))
+            b.alpha = if (Prefs.shuffle(this)) 1f else 0.35f
+            showMsg(if (Prefs.shuffle(this)) "Shuffle: On" else "Shuffle: Off")
+            showControls()
+        }
+        shufBtn.setPadding(dp(8), dp(8), dp(8), dp(8))
+        shufBtn.alpha = if (Prefs.shuffle(this)) 1f else 0.35f
+        exRow.addView(shufBtn)
         exRow.addView(ib("Audio", 14f) {
             pickTrack("Audio Track", mp.getAudioTracks()) { id -> mp.setAudioTrack(id) }
         })
