@@ -81,10 +81,10 @@ object Engine {
     private fun onEnded() {
         if (items.isEmpty()) return
         Prefs.setPos(app, items[idx].toString(), 0L)
-        val rep = Prefs.repeat(app)
+        val rep = Modes.repeat(app, isVideo)
         if (rep == 2) {
             loadAt(app, idx)
-        } else if (Prefs.shuffle(app) && items.size > 1) {
+        } else if (Modes.shuffle(app, isVideo) && items.size > 1) {
             loadAt(app, randomOther())
         } else if (idx + 1 < items.size) {
             loadAt(app, idx + 1)
@@ -189,9 +189,9 @@ object Engine {
 
     fun next(ctx: Context) {
         if (items.isEmpty()) return
-        if (Prefs.shuffle(app) && items.size > 1) loadAt(ctx, randomOther())
+        if (Modes.shuffle(app, isVideo) && items.size > 1) loadAt(ctx, randomOther())
         else if (idx + 1 < items.size) loadAt(ctx, idx + 1)
-        else if (Prefs.repeat(app) == 1) loadAt(ctx, 0)
+        else if (Modes.repeat(app, isVideo) == 1) loadAt(ctx, 0)
     }
 
     fun prev(ctx: Context) {
