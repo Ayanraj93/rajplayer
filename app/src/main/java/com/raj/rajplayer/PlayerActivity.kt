@@ -595,6 +595,7 @@ class PlayerActivity : Activity() {
         } catch (e: Exception) {
         }
         mp.attachViews(layout, null, true, false)
+        Engine.vlayout = layout
         Engine.listener = lis
 
         val scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
@@ -669,7 +670,7 @@ class PlayerActivity : Activity() {
             true
         }
 
-        if (!cont) Engine.setQueue(this, uris, names, index, true) else onItem()
+        if (!cont) layout.post { Engine.setQueue(this, uris, names, index, true) } else onItem()
         showControls()
         ui.post(tick)
     }
@@ -677,11 +678,13 @@ class PlayerActivity : Activity() {
     override fun onResume() {
         super.onResume()
         PlaybackService.stop(this)
+        VideoGuard.start(layout)
     }
 
     override fun onPause() {
         super.onPause()
         Engine.saveProgress()
+        VideoGuard.stop()
         if (Engine.bgAudio && Engine.isPlaying()) PlaybackService.start(this)
     }
 
@@ -695,10 +698,13 @@ class PlayerActivity : Activity() {
         ui.removeCallbacksAndMessages(null)
         if (Engine.listener === lis) Engine.listener = null
         try {
-            Engine.mp?.detachViews()
+            if (Engine.vlayout === layout) {
+                Engine.mp?.detachViews()
+                Engine.vlayout = null
+            }
         } catch (e: Exception) {
         }
-        if (!Engine.bgAudio) {
+        if (!Engine.bgAudio && Engine.listener == null) {
             Engine.stopAll(this)
         } else if (Engine.active && Engine.isPlaying()) {
             PlaybackService.start(this)

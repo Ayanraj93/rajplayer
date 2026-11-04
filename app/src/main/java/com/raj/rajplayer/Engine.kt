@@ -32,6 +32,10 @@ object Engine {
     var ended = false
     var bgAudio = false
     var listener: Listener? = null
+    var vlayout: Any? = null
+    @Volatile var vout = 0
+    @Volatile var voutEver = false
+    @Volatile var forceSoft = false
 
     private lateinit var app: Context
     private var pfd: ParcelFileDescriptor? = null
@@ -56,6 +60,10 @@ object Engine {
         val p = MediaPlayer(v)
         p.setEventListener { ev ->
             val t = ev.type
+            if (t == MediaPlayer.Event.Vout) {
+                vout = ev.voutCount
+                if (ev.voutCount > 0) voutEver = true
+            }
             main.post { onEvent(t) }
         }
         vlc = v
@@ -133,6 +141,7 @@ object Engine {
         if (items.isEmpty()) return
         saveProgress()
         idx = i.coerceIn(0, items.size - 1)
+        vout = 0
         val uri = items[idx]
         title = names.getOrNull(idx) ?: nameOf(app, uri)
         pendingSeek = Prefs.pos(app, uri.toString())
@@ -146,7 +155,9 @@ object Engine {
                 pfd = null
                 media = Media(vlc!!, uri)
             }
-            media.setHWDecoderEnabled(Prefs.hw(app), false)
+            val soft = forceSoft
+            forceSoft = false
+            media.setHWDecoderEnabled(Prefs.hw(app) && !soft, false)
             p.setMedia(media)
             media.release()
             requestFocus()
