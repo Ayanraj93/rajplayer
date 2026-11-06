@@ -881,6 +881,35 @@ class MainActivity : Activity() {
         listHolder.addView(col, FrameLayout.LayoutParams(MP, MP))
     }
 
+    private fun isBatteryUnrestricted(): Boolean {
+        val pm = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
+        return pm.isIgnoringBatteryOptimizations(packageName)
+    }
+
+    private fun requestBatteryUnrestricted() {
+        try {
+            val i = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
+            i.data = Uri.parse("package:" + packageName)
+            startActivity(i)
+        } catch (e: Exception) {
+            openBatterySettings()
+        }
+    }
+
+    private fun openBatterySettings() {
+        try {
+            startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
+        } catch (e: Exception) {
+            openAppInfoPage()
+        }
+    }
+
+    private fun openAppInfoPage() {
+        val i = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
+        i.data = Uri.fromParts("package", packageName, null)
+        startActivity(i)
+    }
+
     private fun applyPreset(bg: String, tx: String, ac: String) {
         Prefs.setBg(this, Color.parseColor(bg))
         Prefs.setText(this, Color.parseColor(tx))
@@ -951,6 +980,14 @@ class MainActivity : Activity() {
             Engine.bgAudio = Prefs.bgAudio(this)
             showSettings()
         })
+
+        root.addView(label("Background Protection", 15f, tc))
+        val batOk = isBatteryUnrestricted()
+        root.addView(label(if (batOk) "Status: ON (Unrestricted). System app ko background me band nahi karega." else "Status: OFF. System battery bachane ke liye app ko background me band kar sakta hai.", 13f, tc))
+        if (!batOk) root.addView(button("Allow Background Activity (Unrestricted)", ac) { requestBatteryUnrestricted() })
+        root.addView(button("Battery optimization list kholo", ac) { openBatterySettings() })
+        root.addView(button("App Info kholo (Battery, Auto-launch)", ac) { openAppInfoPage() })
+        root.addView(label("Tip: App Info > Battery usage > 'Allow background activity' / Unrestricted chunna. Manual Force Stop ko Android khud rokne nahi deta, ye feature sirf system ke apne band karne se bachata hai.", 12f, tc))
 
         root.addView(label("Manual Double-Tap Seek Time", 15f, tc))
         val seekSecs = intArrayOf(5, 10, 15, 20, 30)
