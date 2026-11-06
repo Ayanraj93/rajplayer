@@ -176,31 +176,6 @@ class PlayerActivity : Activity() {
 
     private fun controlsVisible() = lockBtn.visibility == View.VISIBLE
 
-    private fun applyOrientation(uri: Uri) {
-        var o = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        videoPortrait = false
-        try {
-            if (uri.scheme == "content" || uri.scheme == "file") {
-                val r = MediaMetadataRetriever()
-                r.setDataSource(this, uri)
-                val w = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
-                val hh = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
-                val rot = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-                r.release()
-                val dw = if (rot == 90 || rot == 270) hh else w
-                val dh = if (rot == 90 || rot == 270) w else hh
-                if (dw == 0 && dh == 0) {
-                    o = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
-                } else if (dh > dw) {
-                    o = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-                    videoPortrait = true
-                }
-            }
-        } catch (e: Exception) {
-        }
-        requestedOrientation = o
-    }
-
     private fun onItem() {
         if (!Engine.active) {
             finish()
@@ -477,12 +452,10 @@ class PlayerActivity : Activity() {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
                 if (fromUser) curTv.text = fmt(p.toLong())
             }
-
             override fun onStartTrackingTouch(s: SeekBar?) {
                 userSeeking = true
                 ui.removeCallbacks(hideRun)
             }
-
             override fun onStopTrackingTouch(s: SeekBar?) {
                 mp.setTime((s?.progress ?: 0).toLong())
                 userSeeking = false
@@ -613,12 +586,10 @@ class PlayerActivity : Activity() {
 
         val gd = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean = true
-
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 if (controlsVisible()) hideControls() else showControls()
                 return true
             }
-
             override fun onDoubleTap(e: MotionEvent): Boolean {
                 if (locked) return true
                 val w = touchView.width
@@ -628,7 +599,6 @@ class PlayerActivity : Activity() {
                 else togglePlay()
                 return true
             }
-
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
                 if (locked || e1 == null) return false
                 val w = touchView.width.toFloat()
@@ -694,7 +664,10 @@ class PlayerActivity : Activity() {
     override fun onStop() {
         super.onStop()
         if (!Engine.bgAudio && Engine.isPlaying()) Engine.pause()
-        if (Engine.bgAudio && Engine.isPlaying()) Bg.toAudioOnly()
+        if (Engine.bgAudio && Engine.isPlaying()) {
+            Bg.toAudioOnly()
+            PlaybackService.start(this)
+        }
     }
 
     override fun onDestroy() {
@@ -708,9 +681,7 @@ class PlayerActivity : Activity() {
             }
         } catch (e: Exception) {
         }
-        if (!Engine.bgAudio && Engine.listener == null) {
-            Engine.stopAll(this)
-        } else if (Engine.active && Engine.isPlaying()) {
+        if (Engine.active && Engine.isPlaying()) {
             PlaybackService.start(this)
         }
     }

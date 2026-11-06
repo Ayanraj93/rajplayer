@@ -16,6 +16,9 @@ object Prefs {
     fun setAccent(c: Context, v: Int) { p(c).edit().putInt("accent", v).apply() }
     fun setWall(c: Context, v: String?) { p(c).edit().putString("wall", v).apply() }
 
+    fun rgbAnim(c: Context): Boolean = p(c).getBoolean("rgb_anim", false)
+    fun setRgbAnim(c: Context, v: Boolean) { p(c).edit().putBoolean("rgb_anim", v).apply() }
+
     fun pos(c: Context, key: String): Long = p(c).getLong("pos_" + key, 0L)
     fun setPos(c: Context, key: String, v: Long) {
         val e = p(c).edit()

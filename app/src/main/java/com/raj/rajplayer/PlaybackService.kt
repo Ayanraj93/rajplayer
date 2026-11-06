@@ -56,24 +56,19 @@ class PlaybackService : Service() {
             override fun onPlay() {
                 if (!Engine.isPlaying()) Engine.toggle(this@PlaybackService)
             }
-
             override fun onPause() {
                 if (Engine.isPlaying()) Engine.toggle(this@PlaybackService)
             }
-
             override fun onSkipToNext() {
                 Engine.next(this@PlaybackService)
             }
-
             override fun onSkipToPrevious() {
                 Engine.prev(this@PlaybackService)
             }
-
             override fun onSeekTo(pos: Long) {
                 Engine.seekTo(pos)
                 refresh()
             }
-
             override fun onStop() {
                 closeAll()
             }
