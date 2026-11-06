@@ -3,12 +3,15 @@ package com.raj.rajplayer
 import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
+import android.media.AudioAttributes
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.net.Uri
+import android.net.wifi.WifiManager
 import android.os.Handler
 import android.os.Looper
 import android.os.ParcelFileDescriptor
+import android.os.PowerManager
 import android.provider.OpenableColumns
 import android.widget.Toast
 import org.videolan.libvlc.LibVLC
@@ -32,38 +35,69 @@ object Engine {
     var ended = false
     var bgAudio = false
     var listener: Listener? = null
-    var vlayout: Any? = null
-    @Volatile var vout = 0
-    @Volatile var voutEver = false
-    @Volatile var forceSoft = false
 
     private lateinit var app: Context
     private var pfd: ParcelFileDescriptor? = null
     private var pendingSeek = 0L
     private val main = Handler(Looper.getMainLooper())
     private var focusReq: AudioFocusRequest? = null
+    private var resumeOnFocus = false
+    private var errStreak = 0
+    private var wake: PowerManager.WakeLock? = null
+    private var wifi: WifiManager.WifiLock? = null
     private val sleepRun = Runnable {
         pause()
         notifyChanged()
     }
 
+    // ---------- wake locks: screen off me bhi CPU/WiFi jaga rahe ----------
+    private fun holdLocks() {
+        try {
+            var w = wake
+            if (w == null) {
+                val pm = app.getSystemService(Context.POWER_SERVICE) as PowerManager
+                w = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "RajPlayer:playback")
+                w.setReferenceCounted(false)
+                wake = w
+            }
+            if (!w.isHeld) w.acquire(6 * 60 * 60 * 1000L)
+
+            val u = items.getOrNull(idx)
+            val net = u != null && (u.scheme == "http" || u.scheme == "https" ||
+                    u.scheme == "rtsp" || u.scheme == "rtmp")
+            if (net) {
+                var f = wifi
+                if (f == null) {
+                    val wm = app.applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                    f = wm.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, "RajPlayer:wifi")
+                    f.setReferenceCounted(false)
+                    wifi = f
+                }
+                if (!f.isHeld) f.acquire()
+            }
+        } catch (e: Exception) {
+        }
+    }
+
+    private fun releaseLocks() {
+        try {
+            val w = wake
+            if (w != null && w.isHeld) w.release()
+            val f = wifi
+            if (f != null && f.isHeld) f.release()
+        } catch (e: Exception) {
+        }
+    }
+
+    // ---------- player ----------
     fun ensure(ctx: Context): MediaPlayer {
         app = ctx.applicationContext
         val existing = mp
         if (existing != null) return existing
-        val opts = ArrayList<String>()
-        opts.add("--file-caching=300")
-        opts.add("--network-caching=1500")
-        opts.add("--clock-jitter=0")
-        opts.add("--clock-synchro=0")
-        val v = LibVLC(app, opts)
+        val v = LibVLC(app)
         val p = MediaPlayer(v)
         p.setEventListener { ev ->
             val t = ev.type
-            if (t == MediaPlayer.Event.Vout) {
-                vout = ev.voutCount
-                if (ev.voutCount > 0) voutEver = true
-            }
             main.post { onEvent(t) }
         }
         vlc = v
@@ -74,25 +108,42 @@ object Engine {
     private fun onEvent(t: Int) {
         val p = mp ?: return
         if (t == MediaPlayer.Event.Playing) {
+            errStreak = 0
             if (pendingSeek > 0) {
                 p.setTime(pendingSeek)
                 pendingSeek = 0
             }
+            holdLocks()
             notifyChanged()
         } else if (t == MediaPlayer.Event.Paused) {
+            releaseLocks()
             notifyChanged()
         } else if (t == MediaPlayer.Event.EndReached) {
             onEnded()
+        } else if (t == MediaPlayer.Event.EncounteredError) {
+            onError()
         }
+    }
+
+    // kharab file aaye to agle par chale jao (5 baar se zyada lagatar nahi)
+    private fun onError() {
+        errStreak++
+        if (errStreak > 5 || items.isEmpty() || idx + 1 >= items.size) {
+            ended = true
+            releaseLocks()
+            notifyChanged()
+            return
+        }
+        loadAt(app, idx + 1)
     }
 
     private fun onEnded() {
         if (items.isEmpty()) return
         Prefs.setPos(app, items[idx].toString(), 0L)
-        val rep = Modes.repeat(app, isVideo)
+        val rep = Prefs.repeat(app)
         if (rep == 2) {
             loadAt(app, idx)
-        } else if (Modes.shuffle(app, isVideo) && items.size > 1) {
+        } else if (Prefs.shuffle(app) && items.size > 1) {
             loadAt(app, randomOther())
         } else if (idx + 1 < items.size) {
             loadAt(app, idx + 1)
@@ -100,6 +151,7 @@ object Engine {
             loadAt(app, 0)
         } else {
             ended = true
+            releaseLocks()
             notifyChanged()
         }
     }
@@ -133,6 +185,7 @@ object Engine {
         items = uris
         names = nm
         isVideo = video
+        errStreak = 0
         loadAt(ctx, index.coerceIn(0, uris.size - 1))
     }
 
@@ -141,7 +194,6 @@ object Engine {
         if (items.isEmpty()) return
         saveProgress()
         idx = i.coerceIn(0, items.size - 1)
-        vout = 0
         val uri = items[idx]
         title = names.getOrNull(idx) ?: nameOf(app, uri)
         pendingSeek = Prefs.pos(app, uri.toString())
@@ -155,13 +207,13 @@ object Engine {
                 pfd = null
                 media = Media(vlc!!, uri)
             }
-            val soft = forceSoft
-            forceSoft = false
-            media.setHWDecoderEnabled(Prefs.hw(app) && !soft, false)
+            media.setHWDecoderEnabled(Prefs.hw(app), false)
             p.setMedia(media)
             media.release()
+            resumeOnFocus = false
             requestFocus()
             p.play()
+            holdLocks()
             active = true
             ended = false
         } catch (e: Exception) {
@@ -183,26 +235,30 @@ object Engine {
             return
         }
         if (p.isPlaying) {
+            resumeOnFocus = false
             p.pause()
             saveProgress()
+            releaseLocks()
         } else {
             requestFocus()
             p.play()
-            resync()
+            holdLocks()
         }
         notifyChanged()
     }
 
     fun pause() {
+        resumeOnFocus = false
         mp?.pause()
         saveProgress()
+        releaseLocks()
     }
 
     fun next(ctx: Context) {
         if (items.isEmpty()) return
-        if (Modes.shuffle(app, isVideo) && items.size > 1) loadAt(ctx, randomOther())
+        if (Prefs.shuffle(app) && items.size > 1) loadAt(ctx, randomOther())
         else if (idx + 1 < items.size) loadAt(ctx, idx + 1)
-        else if (Modes.repeat(app, isVideo) == 1) loadAt(ctx, 0)
+        else if (Prefs.repeat(app) == 1) loadAt(ctx, 0)
     }
 
     fun prev(ctx: Context) {
@@ -231,6 +287,7 @@ object Engine {
     fun stopAll(ctx: Context) {
         saveProgress()
         main.removeCallbacks(sleepRun)
+        resumeOnFocus = false
         try {
             mp?.stop()
         } catch (e: Exception) {
@@ -242,23 +299,45 @@ object Engine {
         pfd = null
         active = false
         ended = false
+        releaseLocks()
         PlaybackService.stop(ctx)
         listener?.onItemChanged()
     }
 
     fun notifyChanged() {
+        if (isPlaying()) holdLocks()
         PlaybackService.instance?.refresh()
     }
 
+    // ---------- audio focus: notification/call ke baad gaana wapas chale ----------
     private fun requestFocus() {
         try {
             val am = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
             var r = focusReq
             if (r == null) {
+                val attrs = AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_MEDIA)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                    .build()
                 r = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+                    .setAudioAttributes(attrs)
                     .setOnAudioFocusChangeListener { c ->
-                        if (c == AudioManager.AUDIOFOCUS_LOSS || c == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
-                            main.post {
+                        main.post {
+                            if (c == AudioManager.AUDIOFOCUS_GAIN) {
+                                if (resumeOnFocus) {
+                                    resumeOnFocus = false
+                                    mp?.play()
+                                    holdLocks()
+                                    notifyChanged()
+                                }
+                            } else if (c == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+                                if (isPlaying()) {
+                                    resumeOnFocus = true
+                                    mp?.pause()
+                                    notifyChanged()
+                                }
+                            } else if (c == AudioManager.AUDIOFOCUS_LOSS) {
+                                resumeOnFocus = false
                                 pause()
                                 notifyChanged()
                             }
@@ -267,13 +346,15 @@ object Engine {
                     .build()
                 focusReq = r
             }
-            am.requestAudioFocus(r!!)
+            am.requestAudioFocus(r)
         } catch (e: Exception) {
         }
     }
 }
 
+// Equalizer / Boost / Sleep dialogs: Audio aur Video dono screen me kaam aate hain
 object Dialogs {
+
     fun eq(a: Activity) {
         val p = Engine.mp ?: return
         val n = MediaPlayer.Equalizer.getPresetCount()
