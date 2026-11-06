@@ -53,6 +53,7 @@ class MainActivity : Activity() {
     private lateinit var miniPlay: TextView
     private var selCountTv: TextView? = null
     private var curAdapter: BaseAdapter? = null
+    private var brandTv: TextView? = null
 
     private var videos: List<V> = emptyList()
     private var audios: List<V> = emptyList()
@@ -76,6 +77,21 @@ class MainActivity : Activity() {
         "#FF9800", "#FF5252", "#FF4081", "#E040FB", "#7C4DFF", "#448AFF", "#00E5FF", "#00E676"
     )
 
+    private var rgbHue = 0f
+    private val rgbHandler = Handler(Looper.getMainLooper())
+    private val rgbRunnable = object : Runnable {
+        override fun run() {
+            if (Prefs.rgbAnim(this@MainActivity)) {
+                rgbHue = (rgbHue + 5f) % 360f
+                val rgbColor = Color.HSVToColor(floatArrayOf(rgbHue, 1f, 1f))
+                Prefs.setAccent(this@MainActivity, rgbColor)
+                // Sirf brand text aur active elements ka color update hoga, layout recreate nahi hoga jisse touch kabhi block nahi hoga
+                brandTv?.setTextColor(rgbColor)
+            }
+            rgbHandler.postDelayed(this, 60)
+        }
+    }
+
     private val miniTick = object : Runnable {
         override fun run() {
             refreshMini()
@@ -85,25 +101,14 @@ class MainActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        // CPU core priority boost for touch responsiveness
-        try {
-            window.decorView.isHapticFeedbackEnabled = true
-        } catch (e: Exception) {
-        }
         frame = FrameLayout(this)
         setContentView(frame)
         Engine.bgAudio = Prefs.bgAudio(this)
         ui.postDelayed({ Engine.ensure(applicationContext) }, 400)
+        rgbHandler.post(rgbRunnable)
     }
 
-    // Touch event ko turant priority dene ke liye dispatcher override
     override fun dispatchTouchEvent(ev: MotionEvent?): Boolean {
-        try {
-            if (ev?.action == MotionEvent.ACTION_DOWN) {
-                window.decorView.sendAccessibilityEvent(android.view.accessibility.AccessibilityEvent.TYPE_VIEW_CLICKED)
-            }
-        } catch (e: Exception) {
-        }
         return super.dispatchTouchEvent(ev)
     }
 
@@ -121,6 +126,11 @@ class MainActivity : Activity() {
     override fun onPause() {
         super.onPause()
         ui.removeCallbacks(miniTick)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        rgbHandler.removeCallbacks(rgbRunnable)
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
@@ -732,6 +742,7 @@ class MainActivity : Activity() {
             brand.textSize = 22f
             brand.setTextColor(ac)
             brand.setTypeface(null, android.graphics.Typeface.BOLD)
+            brandTv = brand
             head.addView(brand, LinearLayout.LayoutParams(0, WC, 1f))
             head.addView(sym("\uD83D\uDD0D", tc) {
                 searchOn = !searchOn
@@ -899,6 +910,7 @@ class MainActivity : Activity() {
     }
 
     private fun applyPreset(bg: String, tx: String, ac: String) {
+        Prefs.setRgbAnim(this, false)
         Prefs.setBg(this, Color.parseColor(bg))
         Prefs.setText(this, Color.parseColor(tx))
         Prefs.setAccent(this, Color.parseColor(ac))
@@ -924,6 +936,7 @@ class MainActivity : Activity() {
             lp.setMargins(dp(4), dp(4), dp(4), dp(4))
             b.layoutParams = lp
             b.setOnClickListener {
+                Prefs.setRgbAnim(this, false)
                 set(c)
                 showSettings()
             }
@@ -939,6 +952,7 @@ class MainActivity : Activity() {
         root.addView(et)
         root.addView(button("Apply Color", ac) {
             try {
+                Prefs.setRgbAnim(this, false)
                 set(Color.parseColor(et.text.toString().trim()))
                 showSettings()
             } catch (e: Exception) {
@@ -961,6 +975,20 @@ class MainActivity : Activity() {
         root.setPadding(dp(16), dp(40), dp(16), dp(24))
         root.addView(label("\u2699\uFE0F Ultra Settings", 24f, tc))
         root.addView(button("\u2190 Back", ac) { showHome() })
+
+        // RGB Animation Toggle Button
+        val rgbState = Prefs.rgbAnim(this)
+        root.addView(button("🌈 RGB Animated Theme: " + if (rgbState) "ON" else "OFF", ac) {
+            Prefs.setRgbAnim(this, !rgbState)
+            showSettings()
+        })
+
+        // Quick Light & Dark Switcher
+        root.addView(label("Quick Themes (Light / Dark)", 15f, tc))
+        val qtr = LinearLayout(this)
+        qtr.addView(button("☀️ Light Theme", ac) { applyPreset("#F5F7FA", "#111111", "#2979FF") })
+        qtr.addView(button("🌙 Dark Theme", ac) { applyPreset("#0B0F14", "#FFFFFF", "#00E676") })
+        root.addView(qtr)
 
         root.addView(label("Video Background Audio", 15f, tc))
         root.addView(button("Background Audio: " + (if (Prefs.bgAudio(this)) "ON" else "OFF"), ac) {
