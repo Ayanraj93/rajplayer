@@ -52,6 +52,7 @@ class MainActivity : Activity() {
     private lateinit var miniPlay: TextView
     private var selCountTv: TextView? = null
     private var curAdapter: BaseAdapter? = null
+    private var brandTv: TextView? = null
 
     private var videos: List<V> = emptyList()
     private var audios: List<V> = emptyList()
@@ -83,9 +84,10 @@ class MainActivity : Activity() {
                 rgbHue = (rgbHue + 4f) % 360f
                 val rgbColor = Color.HSVToColor(floatArrayOf(rgbHue, 1f, 1f))
                 Prefs.setAccent(this@MainActivity, rgbColor)
-                if (inSettings) showSettings() else showHome()
+                // Layout ko dobara recreate nahi karenge, sirf active brand text color update hoga taaki touch unresponsive na ho
+                brandTv?.setTextColor(rgbColor)
             }
-            rgbHandler.postDelayed(this, 50)
+            rgbHandler.postDelayed(this, 80)
         }
     }
 
@@ -735,6 +737,7 @@ class MainActivity : Activity() {
             brand.textSize = 22f
             brand.setTextColor(ac)
             brand.setTypeface(null, android.graphics.Typeface.BOLD)
+            brandTv = brand
             head.addView(brand, LinearLayout.LayoutParams(0, WC, 1f))
             head.addView(sym("\uD83D\uDD0D", tc) {
                 searchOn = !searchOn
@@ -901,35 +904,6 @@ class MainActivity : Activity() {
         listHolder.addView(col, FrameLayout.LayoutParams(MP, MP))
     }
 
-    private fun isBatteryUnrestricted(): Boolean {
-        val pm = getSystemService(android.content.Context.POWER_SERVICE) as android.os.PowerManager
-        return pm.isIgnoringBatteryOptimizations(packageName)
-    }
-
-    private fun requestBatteryUnrestricted() {
-        try {
-            val i = Intent(android.provider.Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-            i.data = Uri.parse("package:" + packageName)
-            startActivity(i)
-        } catch (e: Exception) {
-            openBatterySettings()
-        }
-    }
-
-    private fun openBatterySettings() {
-        try {
-            startActivity(Intent(android.provider.Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS))
-        } catch (e: Exception) {
-            openAppInfoPage()
-        }
-    }
-
-    private fun openAppInfoPage() {
-        val i = Intent(android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS)
-        i.data = Uri.fromParts("package", packageName, null)
-        startActivity(i)
-    }
-
     private fun applyPreset(bg: String, tx: String, ac: String) {
         Prefs.setRgbAnim(this, false)
         Prefs.setBg(this, Color.parseColor(bg))
@@ -1017,14 +991,6 @@ class MainActivity : Activity() {
             Engine.bgAudio = Prefs.bgAudio(this)
             showSettings()
         })
-
-        root.addView(label("Background Protection", 15f, tc))
-        val batOk = isBatteryUnrestricted()
-        root.addView(label(if (batOk) "Status: ON (Unrestricted). System app ko background me band nahi karega." else "Status: OFF. System battery bachane ke liye app ko background me band kar sakta hai.", 13f, tc))
-        if (!batOk) root.addView(button("Allow Background Activity (Unrestricted)", ac) { requestBatteryUnrestricted() })
-        root.addView(button("Battery optimization list kholo", ac) { openBatterySettings() })
-        root.addView(button("App Info kholo (Battery, Auto-launch)", ac) { openAppInfoPage() })
-        root.addView(label("Tip: App Info > Battery usage > 'Allow background activity' / Unrestricted chunna. Manual Force Stop ko Android khud rokne nahi deta, ye feature sirf system ke apne band karne se bachata hai.", 12f, tc))
 
         root.addView(label("Manual Double-Tap Seek Time", 15f, tc))
         val seekSecs = intArrayOf(5, 10, 15, 20, 30)
