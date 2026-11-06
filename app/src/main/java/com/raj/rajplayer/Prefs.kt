@@ -38,8 +38,8 @@ object Prefs {
     fun gridView(c: Context): Boolean = p(c).getBoolean("grid_view", false)
     fun setGridView(c: Context, v: Boolean) { p(c).edit().putBoolean("grid_view", v).apply() }
 
-    fun bgAudio(c: Context): Boolean = p(c).getBoolean("bg_audio", false)
-    fun setBgAudio(c: Context, v: Boolean) { p(c).edit().putBoolean("bg_audio", v).apply() }
+    fun bgAudio(c: Context): Boolean = p(c).getBoolean("bg_audio2", true)
+    fun setBgAudio(c: Context, v: Boolean) { p(c).edit().putBoolean("bg_audio2", v).apply() }
 
     fun repeat(c: Context): Int = p(c).getInt("repeat", 0)
     fun setRepeat(c: Context, v: Int) { p(c).edit().putInt("repeat", v).apply() }

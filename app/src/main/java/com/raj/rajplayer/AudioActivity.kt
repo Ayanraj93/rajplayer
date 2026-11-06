@@ -321,7 +321,8 @@ class AudioActivity : Activity() {
             "\uD83D\uDD0A Audio Boost",
             "\u23F1\uFE0F Sleep Timer",
             "\uD83D\uDCC3 Songs Queue",
-            "\u23F9 Stop & Close"
+            "\u23F9 Stop & Close",
+            "\uD83D\uDD0B Battery: Background chalne do"
         )
         AlertDialog.Builder(this)
             .setItems(opts) { _, i ->
@@ -334,6 +335,7 @@ class AudioActivity : Activity() {
                         Engine.stopAll(this)
                         finish()
                     }
+                    5 -> Bg.battery(this)
                     else -> {}
                 }
             }

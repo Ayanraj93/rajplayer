@@ -255,7 +255,8 @@ class PlayerActivity : Activity() {
             abLabel,
             "\uD83C\uDFB5 Background Audio: " + (if (Engine.bgAudio) "ON" else "OFF"),
             "\u26A1 Hardware Decoder: " + (if (Prefs.hw(this)) "ON" else "OFF"),
-            "\uD83D\uDD32 Picture-in-Picture (PiP)"
+            "\uD83D\uDD32 Picture-in-Picture (PiP)",
+            "\uD83D\uDD0B Battery: Background chalne do"
         )
         AlertDialog.Builder(this)
             .setTitle("\u26A1 Ultra Options")
@@ -279,6 +280,7 @@ class PlayerActivity : Activity() {
                         showMsg("HW Decoder " + (if (Prefs.hw(this)) "ON" else "OFF"))
                     }
                     9 -> enterPip()
+                    10 -> Bg.battery(this)
                     else -> {}
                 }
             }
@@ -678,6 +680,7 @@ class PlayerActivity : Activity() {
     override fun onResume() {
         super.onResume()
         PlaybackService.stop(this)
+        Bg.restoreVideo()
         VideoGuard.start(layout)
     }
 
@@ -691,6 +694,7 @@ class PlayerActivity : Activity() {
     override fun onStop() {
         super.onStop()
         if (!Engine.bgAudio && Engine.isPlaying()) Engine.pause()
+        if (Engine.bgAudio && Engine.isPlaying()) Bg.toAudioOnly()
     }
 
     override fun onDestroy() {

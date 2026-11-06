@@ -106,6 +106,7 @@ class PlaybackService : Service() {
 
     fun refresh() {
         updateSession()
+        Bg.wake(this, Engine.active && Engine.isPlaying())
         try {
             if (Build.VERSION.SDK_INT >= 34) {
                 startForeground(NID, build(), ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK)
@@ -193,6 +194,7 @@ class PlaybackService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         if (instance === this) instance = null
+        Bg.wake(this, false)
         try {
             session?.release()
         } catch (e: Exception) {
