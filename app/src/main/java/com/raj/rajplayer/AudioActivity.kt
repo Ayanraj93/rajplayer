@@ -39,6 +39,7 @@ class AudioActivity : Activity() {
     private lateinit var repBtn: TextView
     private lateinit var artImg: ImageView
     private lateinit var artNote: TextView
+    private var musicRgbBorder: View? = null
 
     private val ui = Handler(Looper.getMainLooper())
     private val pool = Executors.newSingleThreadExecutor()
@@ -57,6 +58,23 @@ class AudioActivity : Activity() {
         override fun run() {
             update()
             ui.postDelayed(this, 500)
+        }
+    }
+
+    private val rgbHandler = Handler(Looper.getMainLooper())
+    private var rgbHue = 0f
+    private val rgbRunnable = object : Runnable {
+        override fun run() {
+            if (Prefs.rgbAnim(this@AudioActivity)) {
+                rgbHue = (rgbHue + 6f) % 360f
+                val rgbColor = Color.HSVToColor(floatArrayOf(rgbHue, 1f, 1f))
+                Prefs.setAccent(this@AudioActivity, rgbColor)
+                val gd = GradientDrawable()
+                gd.setStroke(dp(3), rgbColor)
+                gd.cornerRadius = dp(20).toFloat()
+                musicRgbBorder?.background = gd
+            }
+            rgbHandler.postDelayed(this, 50)
         }
     }
 
@@ -120,6 +138,15 @@ class AudioActivity : Activity() {
             } catch (e: Exception) {
             }
         }
+
+        // Music interface border RGB glowing frame
+        val rgbBorderBox = FrameLayout(this)
+        val borderG = GradientDrawable()
+        borderG.setStroke(dp(3), ac)
+        borderG.cornerRadius = dp(20).toFloat()
+        rgbBorderBox.background = borderG
+        musicRgbBorder = rgbBorderBox
+        root.addView(rgbBorderBox, FrameLayout.LayoutParams(MP, MP))
 
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
@@ -256,6 +283,7 @@ class AudioActivity : Activity() {
         if (!cont) Engine.setQueue(this, uris, names, index, false)
         onItem()
         refreshModes()
+        rgbHandler.post(rgbRunnable)
     }
 
     private fun refreshModes() {
@@ -321,8 +349,7 @@ class AudioActivity : Activity() {
             "\uD83D\uDD0A Audio Boost",
             "\u23F1\uFE0F Sleep Timer",
             "\uD83D\uDCC3 Songs Queue",
-            "\u23F9 Stop & Close",
-            "\uD83D\uDD0B Battery: Background chalne do"
+            "\u23F9 Stop & Close"
         )
         AlertDialog.Builder(this)
             .setItems(opts) { _, i ->
@@ -335,7 +362,6 @@ class AudioActivity : Activity() {
                         Engine.stopAll(this)
                         finish()
                     }
-                    5 -> Bg.battery(this)
                     else -> {}
                 }
             }
@@ -368,6 +394,7 @@ class AudioActivity : Activity() {
     override fun onDestroy() {
         super.onDestroy()
         ui.removeCallbacksAndMessages(null)
+        rgbHandler.removeCallbacks(rgbRunnable)
         if (Engine.listener === lis) Engine.listener = null
     }
 }

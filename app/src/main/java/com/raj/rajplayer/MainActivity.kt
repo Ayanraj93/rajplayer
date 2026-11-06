@@ -53,7 +53,7 @@ class MainActivity : Activity() {
     private lateinit var miniPlay: TextView
     private var selCountTv: TextView? = null
     private var curAdapter: BaseAdapter? = null
-    private var brandTv: TextView? = null
+    private var rgbBorderView: View? = null
 
     private var videos: List<V> = emptyList()
     private var audios: List<V> = emptyList()
@@ -82,13 +82,16 @@ class MainActivity : Activity() {
     private val rgbRunnable = object : Runnable {
         override fun run() {
             if (Prefs.rgbAnim(this@MainActivity)) {
-                rgbHue = (rgbHue + 5f) % 360f
+                rgbHue = (rgbHue + 6f) % 360f
                 val rgbColor = Color.HSVToColor(floatArrayOf(rgbHue, 1f, 1f))
                 Prefs.setAccent(this@MainActivity, rgbColor)
-                // Sirf brand text aur active elements ka color update hoga, layout recreate nahi hoga jisse touch kabhi block nahi hoga
-                brandTv?.setTextColor(rgbColor)
+                // Blank jagah aur kinaron par RGB border/line glow update karega bina touch block kiye
+                val gd = GradientDrawable()
+                gd.setStroke(dp(3), rgbColor)
+                gd.cornerRadius = dp(12).toFloat()
+                rgbBorderView?.background = gd
             }
-            rgbHandler.postDelayed(this, 60)
+            rgbHandler.postDelayed(this, 50)
         }
     }
 
@@ -687,7 +690,7 @@ class MainActivity : Activity() {
         bar.setPadding(dp(12), dp(4), dp(4), dp(4))
         val g = GradientDrawable()
         g.setColor(0xEE1A222D.toInt())
-        g.setStroke(dp(1), ac)
+        g.setStroke(dp(2), ac)
         g.cornerRadius = dp(14).toFloat()
         bar.background = g
         miniTitle = TextView(this)
@@ -718,6 +721,15 @@ class MainActivity : Activity() {
         frame.setBackgroundColor(Prefs.bg(this))
         addWallpaper()
 
+        // Blank jagah aur kinaron par glowing RGB border container
+        val rgbBorderBox = FrameLayout(this)
+        val borderG = GradientDrawable()
+        borderG.setStroke(dp(3), ac)
+        borderG.cornerRadius = dp(16).toFloat()
+        rgbBorderBox.background = borderG
+        rgbBorderView = rgbBorderBox
+        frame.addView(rgbBorderBox, FrameLayout.LayoutParams(MP, MP))
+
         val root = LinearLayout(this)
         root.orientation = LinearLayout.VERTICAL
         root.setPadding(dp(12), dp(32), dp(12), dp(8))
@@ -742,7 +754,6 @@ class MainActivity : Activity() {
             brand.textSize = 22f
             brand.setTextColor(ac)
             brand.setTypeface(null, android.graphics.Typeface.BOLD)
-            brandTv = brand
             head.addView(brand, LinearLayout.LayoutParams(0, WC, 1f))
             head.addView(sym("\uD83D\uDD0D", tc) {
                 searchOn = !searchOn
@@ -968,6 +979,15 @@ class MainActivity : Activity() {
         frame.removeAllViews()
         frame.setBackgroundColor(Prefs.bg(this))
         addWallpaper()
+
+        // Settings screen border RGB glow
+        val rgbBorderBox = FrameLayout(this)
+        val borderG = GradientDrawable()
+        borderG.setStroke(dp(3), ac)
+        borderG.cornerRadius = dp(16).toFloat()
+        rgbBorderBox.background = borderG
+        rgbBorderView = rgbBorderBox
+        frame.addView(rgbBorderBox, FrameLayout.LayoutParams(MP, MP))
 
         val sv = ScrollView(this)
         val root = LinearLayout(this)
