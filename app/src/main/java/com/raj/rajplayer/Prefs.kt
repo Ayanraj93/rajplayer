@@ -9,15 +9,31 @@ object Prefs {
     fun bg(c: Context): Int = p(c).getInt("bg", Color.parseColor("#0B0F14"))
     fun text(c: Context): Int = p(c).getInt("text", Color.WHITE)
     fun accent(c: Context): Int = p(c).getInt("accent", Color.parseColor("#00E676"))
-    fun wall(c: Context): String? = p(c).getString("wall", null)
+    
+    fun videoTitleBarColor(c: Context): Int = p(c).getInt("vid_title_bar_col", Color.WHITE)
+    fun videoTitleColor(c: Context): Int = p(c).getInt("vid_title_col", Color.WHITE)
+    fun audioTitleColor(c: Context): Int = p(c).getInt("aud_title_col", Color.WHITE)
+    fun audioTitleBarColor(c: Context): Int = p(c).getInt("aud_title_bar_col", Color.WHITE)
+    fun iconColor(c: Context): Int = p(c).getInt("icon_col", Color.WHITE)
 
     fun setBg(c: Context, v: Int) { p(c).edit().putInt("bg", v).apply() }
     fun setText(c: Context, v: Int) { p(c).edit().putInt("text", v).apply() }
     fun setAccent(c: Context, v: Int) { p(c).edit().putInt("accent", v).apply() }
+    
+    fun setVideoTitleBarColor(c: Context, v: Int) { p(c).edit().putInt("vid_title_bar_col", v).apply() }
+    fun setVideoTitleColor(c: Context, v: Int) { p(c).edit().putInt("vid_title_col", v).apply() }
+    fun setAudioTitleColor(c: Context, v: Int) { p(c).edit().putInt("aud_title_col", v).apply() }
+    fun setAudioTitleBarColor(c: Context, v: Int) { p(c).edit().putInt("aud_title_bar_col", v).apply() }
+    fun setIconColor(c: Context, v: Int) { p(c).edit().putInt("icon_col", v).apply() }
+
+    fun wall(c: Context): String? = p(c).getString("wall", null)
     fun setWall(c: Context, v: String?) { p(c).edit().putString("wall", v).apply() }
 
-    fun rgbAnim(c: Context): Boolean = p(c).getBoolean("rgb_anim", false)
+    fun rgbAnim(c: Context): Boolean = p(c).getBoolean("rgb_anim", true)
     fun setRgbAnim(c: Context, v: Boolean) { p(c).edit().putBoolean("rgb_anim", v).apply() }
+
+    fun themeMode(c: Context): String = p(c).getString("theme_mode", "rgb") ?: "rgb"
+    fun setThemeMode(c: Context, v: String) { p(c).edit().putString("theme_mode", v).apply() }
 
     fun pos(c: Context, key: String): Long = p(c).getLong("pos_" + key, 0L)
     fun setPos(c: Context, key: String, v: Long) {
