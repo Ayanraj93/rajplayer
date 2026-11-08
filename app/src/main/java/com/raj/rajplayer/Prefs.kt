@@ -3,7 +3,6 @@ package com.raj.rajplayer
 import android.content.Context
 import android.graphics.Color
 
-// Theme presets: rgb | pink | dark | light | gradient | none
 object Theme {
     val MODES = arrayOf("rgb", "pink", "dark", "light", "gradient", "none")
     val NAMES = arrayOf("RGB", "Pink", "Dark", "Light", "Gradient", "None")
@@ -49,7 +48,6 @@ object Theme {
 object Prefs {
     private fun p(c: Context) = c.getSharedPreferences("rajplayer_ultra", Context.MODE_PRIVATE)
 
-    // Colour keys (bg/text/accent purane keys hain, isliye manual rang jas ke tas rehte hain)
     const val K_BG = "bg"
     const val K_TEXT = "text"
     const val K_ACCENT = "accent"
@@ -60,7 +58,6 @@ object Prefs {
     const val K_ICON = "c_icon"
     val COLOR_KEYS = arrayOf(K_BG, K_TEXT, K_ACCENT, K_VBAR, K_VTEXT, K_ABAR, K_ATEXT, K_ICON)
 
-    // ---- theme mode ----
     fun themeMode(c: Context): String = p(c).getString("theme_mode", "dark") ?: "dark"
 
     fun setThemeMode(c: Context, mode: String, resetColors: Boolean) {
@@ -70,7 +67,6 @@ object Prefs {
         e.apply()
     }
 
-    // ---- colours ----
     fun color(c: Context, key: String): Int {
         val s = p(c)
         return if (s.contains(key)) s.getInt(key, 0) else Theme.preset(themeMode(c), key)
@@ -99,21 +95,26 @@ object Prefs {
     fun setText(c: Context, v: Int) = setColor(c, K_TEXT, v)
     fun setAccent(c: Context, v: Int) = setColor(c, K_ACCENT, v)
 
-    // ---- animation ----
     fun atomicOn(c: Context): Boolean = p(c).getBoolean("atomic_on", true)
     fun setAtomicOn(c: Context, v: Boolean) { p(c).edit().putBoolean("atomic_on", v).apply() }
 
-    fun atomSpeed(c: Context): Float = p(c).getFloat("atom_speed", 1f).coerceIn(0.5f, 2f)
-    fun setAtomSpeed(c: Context, v: Float) { p(c).edit().putFloat("atom_speed", v.coerceIn(0.5f, 2f)).apply() }
+    // Video player margin atomic animation toggle specifically
+    fun playerMarginAnim(c: Context): Boolean = p(c).getBoolean("player_margin_anim", true)
+    fun setPlayerMarginAnim(c: Context, v: Boolean) { p(c).edit().putBoolean("player_margin_anim", v).apply() }
+
+    // Speed up to 6.0x
+    fun atomSpeed(c: Context): Float = p(c).getFloat("atom_speed", 1f).coerceIn(0.5f, 6f)
+    fun setAtomSpeed(c: Context, v: Float) { p(c).edit().putFloat("atom_speed", v.coerceIn(0.5f, 6f)).apply() }
 
     fun rgbBorder(c: Context): Boolean = p(c).getBoolean("rgb_border", false)
     fun setRgbBorder(c: Context, v: Boolean) { p(c).edit().putBoolean("rgb_border", v).apply() }
 
-    // ---- wallpaper ----
+    fun lastPlayedUri(c: Context): String? = p(c).getString("last_played_uri", null)
+    fun setLastPlayedUri(c: Context, uri: String?) { p(c).edit().putString("last_played_uri", uri).apply() }
+
     fun wall(c: Context): String? = p(c).getString("wall", null)
     fun setWall(c: Context, v: String?) { p(c).edit().putString("wall", v).apply() }
 
-    // ---- playback state ----
     fun pos(c: Context, key: String): Long = p(c).getLong("pos_" + key, 0L)
     fun setPos(c: Context, key: String, v: Long) {
         val e = p(c).edit()
@@ -136,7 +137,6 @@ object Prefs {
     fun gridView(c: Context): Boolean = p(c).getBoolean("grid_view", false)
     fun setGridView(c: Context, v: Boolean) { p(c).edit().putBoolean("grid_view", v).apply() }
 
-    // Background audio ab default ON (naya key)
     fun bgAudio(c: Context): Boolean = p(c).getBoolean("bg_audio2", true)
     fun setBgAudio(c: Context, v: Boolean) { p(c).edit().putBoolean("bg_audio2", v).apply() }
 
@@ -164,16 +164,4 @@ object Prefs {
     }
 
     fun isFav(c: Context, uriStr: String): Boolean = favs(c).contains(uriStr)
-
-    fun bms(c: Context, key: String): List<Long> {
-        val s = p(c).getString("bm_" + key, "") ?: ""
-        if (s.isEmpty()) return emptyList()
-        return s.split(",").mapNotNull { it.toLongOrNull() }
-    }
-
-    fun setBms(c: Context, key: String, v: List<Long>) {
-        val e = p(c).edit()
-        if (v.isEmpty()) e.remove("bm_" + key) else e.putString("bm_" + key, v.joinToString(","))
-        e.apply()
-    }
 }
