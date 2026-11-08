@@ -3,177 +3,379 @@ package com.raj.rajplayer
 import android.app.Activity
 import android.app.AlertDialog
 import android.app.PictureInPictureParams
-import android.content.Context
 import android.content.Intent
 import android.content.pm.ActivityInfo
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
-import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
+import android.media.MediaMetadataRetriever
 import android.net.Uri
-import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.os.SystemClock
 import android.text.TextUtils
 import android.util.Rational
+import android.view.GestureDetector
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.ScaleGestureDetector
-import android.view.SurfaceHolder
-import android.view.SurfaceView
 import android.view.View
 import android.view.ViewGroup
-import android.view.WindowInsets
-import android.view.WindowInsetsController
 import android.view.WindowManager
 import android.widget.FrameLayout
-import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
-import org.videolan.libvlc.interfaces.IVLCVout
-import kotlin.math.abs
-import kotlin.math.max
-import kotlin.math.min
-import kotlin.math.roundToInt
+import java.io.File
+import org.videolan.libvlc.MediaPlayer
+import org.videolan.libvlc.util.VLCVideoLayout
 
-class PlayerActivity : Activity(), SurfaceHolder.Callback, IVLCVout.OnNewVideoLayoutListener {
+class PlayerActivity : Activity() {
 
     private val MP = ViewGroup.LayoutParams.MATCH_PARENT
     private val WC = ViewGroup.LayoutParams.WRAP_CONTENT
 
-    private lateinit var root: FrameLayout
-    private lateinit var videoContainer: FrameLayout
-    private lateinit var surface: SurfaceView
-    private lateinit var marginAtomic: AtomicView
-    private lateinit var uiOverlay: FrameLayout
+    private val mp: MediaPlayer get() = Engine.mp!!
+
+    private lateinit var layout: VLCVideoLayout
+    private lateinit var touchView: View
     private lateinit var topBar: LinearLayout
-    private lateinit var bottomBar: LinearLayout
+    private lateinit var controls: LinearLayout
     private lateinit var lockBtn: TextView
-    private lateinit var centerToast: TextView
     private lateinit var titleTv: TextView
+    private lateinit var msgTv: TextView
+    private lateinit var seek: SeekBar
     private lateinit var curTv: TextView
     private lateinit var durTv: TextView
-    private lateinit var seek: SeekBar
     private lateinit var playBtn: TextView
-    private lateinit var ratioBtn: TextView
-    private lateinit var speedBtn: TextView
-    private lateinit var marginBtn: TextView
+    private lateinit var fitBtn: TextView
+    private lateinit var audioMgr: AudioManager
 
     private val ui = Handler(Looper.getMainLooper())
-    private lateinit var am: AudioManager
 
-    private var videoW = 0
-    private var videoH = 0
-    private var attached = false
-    private var controlsVisible = true
     private var locked = false
     private var userSeeking = false
+    private var videoPortrait = false
+    private var abA = -1L
+    private var abB = -1L
 
-    // Aspect Ratio & Sizing Modes:
-    // 0 = Native Default Fit, 1 = Fill Screen, 2 = 16:9, 3 = 9:16, 4 = 4:3, 5 = Small 75% (shows margin animation), 6 = Mini 55% (shows margin animation)
-    private var ratioMode = 0
-    private val ratioNames = arrayOf("Native", "Fill", "16:9", "9:16", "4:3", "Small 75%", "Mini 55%")
+    private var gMode = 0
+    private var seekTarget = 0L
+    private var brightCur = 0.5f
+    private var volCur = 0.5f
+    private var videoScaleFactor = 1.0f
 
-    // Playback Speeds up to 6.0x
     private val speeds = floatArrayOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 2.5f, 3.0f, 4.0f, 6.0f)
     private var speedIdx = 2
+    private val scales = listOf(
+        MediaPlayer.ScaleType.SURFACE_BEST_FIT,
+        MediaPlayer.ScaleType.SURFACE_FIT_SCREEN,
+        MediaPlayer.ScaleType.SURFACE_FILL,
+        MediaPlayer.ScaleType.SURFACE_16_9,
+        MediaPlayer.ScaleType.SURFACE_4_3,
+        MediaPlayer.ScaleType.SURFACE_ORIGINAL
+    )
+    private val scaleNames = listOf("Fit", "Screen", "Fill", "16:9", "4:3", "Orig")
+    private var scaleIdx = 0
 
-    // Zoom & Touch Gesture Isolation State
-    private lateinit var scaleDetector: ScaleGestureDetector
-    private var zoomScale = 1.0f
-    private var isZooming = false
-    private var zoomCooldownUntil = 0L
-    private var touchMode = 0 // 0 = none, 1 = seek, 2 = volume, 3 = brightness
-    private var downX = 0f
-    private var downY = 0f
-    private var startVol = 0
-    private var maxVol = 15
-    private var startBright = 0.5f
-    private var startSeekPos = 0L
-    private var lastTapTime = 0L
-    private var lastTapX = 0f
-
-    private val hideControlsRun = Runnable { hideControls() }
-    private val hideToastRun = Runnable { centerToast.visibility = View.GONE }
-
-    private val tick = object : Runnable {
-        override fun run() {
-            updateProgress()
-            ui.postDelayed(this, 400)
-        }
-    }
+    private val hideRun = Runnable { hideControls() }
+    private val hideMsg = Runnable { msgTv.visibility = View.GONE }
 
     private val lis = object : Engine.Listener {
         override fun onItemChanged() {
-            runOnUiThread { onTrackLoaded() }
+            runOnUiThread { onItem() }
+        }
+    }
+
+    private val tick = object : Runnable {
+        override fun run() {
+            val p = Engine.mp
+            if (p != null) {
+                val len = p.getLength()
+                val t = p.getTime()
+                if (len > 0) {
+                    if (!userSeeking) {
+                        seek.max = len.toInt()
+                        seek.progress = t.toInt()
+                    }
+                    durTv.text = fmt(len)
+                }
+                if (abA >= 0 && abB > abA && t >= abB) p.setTime(abA)
+                if (!userSeeking) curTv.text = fmt(t)
+                playBtn.text = if (p.isPlaying) "\u23F8" else "\u25B6"
+            }
+            ui.postDelayed(this, 500)
         }
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
+    private fun contrast(c: Int) = if (Color.luminance(c) > 0.5f) Color.BLACK else Color.WHITE
+
     private fun fmt(ms: Long): String {
-        val s = if (ms < 0) 0L else ms / 1000
+        val s = if (ms < 0) 0 else ms / 1000
         val hh = s / 3600
         val mm = (s % 3600) / 60
         val ss = s % 60
         return if (hh > 0) String.format("%d:%02d:%02d", hh, mm, ss) else String.format("%d:%02d", mm, ss)
     }
 
-    private fun contrast(c: Int) = if (Color.luminance(c) > 0.5f) Color.BLACK else Color.WHITE
-
-    private fun ib(txt: String, size: Float, color: Int, fn: (TextView) -> Unit): TextView {
+    private fun ib(sym: String, size: Float, f: (TextView) -> Unit): TextView {
         val t = TextView(this)
-        t.text = txt
+        t.text = sym
         t.textSize = size
-        t.setTextColor(color)
+        t.setTextColor(Prefs.iconColor(this))
         t.gravity = Gravity.CENTER
-        t.setPadding(dp(10), dp(6), dp(10), dp(6))
-        t.setOnClickListener {
-            resetHideTimer()
-            fn(t)
-        }
+        t.setPadding(dp(12), dp(8), dp(12), dp(8))
+        t.setOnClickListener { f(t) }
         return t
     }
 
     @Suppress("DEPRECATION")
-    private fun extractIncomingUri(): Uri? {
-        if (intent?.action == Intent.ACTION_SEND) {
-            val stream = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
-            if (stream != null) return stream
-            val cd = intent.clipData
-            if (cd != null && cd.itemCount > 0) return cd.getItemAt(0).uri
+    private fun hideBars() {
+        window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) hideBars()
+    }
+
+    private fun showMsg(s: String) {
+        msgTv.text = s
+        msgTv.visibility = View.VISIBLE
+        ui.removeCallbacks(hideMsg)
+        ui.postDelayed(hideMsg, 900)
+    }
+
+    private fun showControls() {
+        if (locked) {
+            lockBtn.visibility = View.VISIBLE
+        } else {
+            topBar.visibility = View.VISIBLE
+            controls.visibility = View.VISIBLE
+            lockBtn.visibility = View.VISIBLE
         }
-        return intent?.data
+        ui.removeCallbacks(hideRun)
+        ui.postDelayed(hideRun, 4000)
+    }
+
+    private fun hideControls() {
+        topBar.visibility = View.GONE
+        controls.visibility = View.GONE
+        lockBtn.visibility = View.GONE
+    }
+
+    private fun controlsVisible() = lockBtn.visibility == View.VISIBLE
+
+    private fun onItem() {
+        if (!Engine.active) {
+            finish()
+            return
+        }
+        titleTv.text = Engine.title
+        abA = -1L
+        abB = -1L
+        Orient.setFor(this, Engine.cur()) { videoPortrait = it }
+    }
+
+    private fun togglePlay() {
+        Engine.toggle(this)
+        showControls()
+    }
+
+    private fun seekBy(ms: Long) {
+        mp.setTime(Math.max(0L, mp.getTime() + ms))
+        showMsg(if (ms > 0) "+" + (ms / 1000) + "s" else "" + (ms / 1000) + "s")
+    }
+
+    private fun pickTrack(title: String, tracks: Array<MediaPlayer.TrackDescription>?, set: (Int) -> Unit) {
+        if (tracks == null || tracks.isEmpty()) {
+            Toast.makeText(this, "No tracks available", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val names = tracks.map { it.name ?: ("Track " + it.id) }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setItems(names) { _, i -> set(tracks[i].id) }
+            .show()
+    }
+
+    private fun endGesture() {
+        if (gMode == 3) mp.setTime(seekTarget)
+        gMode = 0
+        ui.removeCallbacks(hideMsg)
+        ui.postDelayed(hideMsg, 600)
+    }
+
+    private fun showMenu() {
+        val abLabel = if (abA < 0) "A-B Repeat: Set Point A"
+        else if (abB < 0) "A-B Repeat: Set Point B"
+        else "Disable A-B Repeat"
+        val opts = arrayOf(
+            "\uD83C\uDF9A\uFE0F Equalizer Presets",
+            "\uD83D\uDD0A Audio Boost (Up to 200%)",
+            "\u23F1\uFE0F Sleep Timer",
+            "\uD83D\uDCC2 Load External Subtitle",
+            "\uD83D\uDD16 Add Bookmark",
+            "\uD83D\uDCD1 View Bookmarks",
+            abLabel,
+            "\uD83C\uDFB5 Background Audio: " + (if (Engine.bgAudio) "ON" else "OFF"),
+            "\u26A1 Hardware Decoder: " + (if (Prefs.hw(this)) "ON" else "OFF"),
+            "\uD83D\uDD32 Picture-in-Picture (PiP)",
+            "\uD83D\uDD0B Battery: Background chalne do"
+        )
+        AlertDialog.Builder(this)
+            .setTitle("\u26A1 Ultra Options")
+            .setItems(opts) { _, i ->
+                when (i) {
+                    0 -> Dialogs.eq(this)
+                    1 -> Dialogs.boost(this)
+                    2 -> Dialogs.sleep(this)
+                    3 -> pickSub()
+                    4 -> addBookmark()
+                    5 -> bookmarksDialog()
+                    6 -> abStep()
+                    7 -> {
+                        Engine.bgAudio = !Engine.bgAudio
+                        Prefs.setBgAudio(this, Engine.bgAudio)
+                        showMsg("Background Audio " + (if (Engine.bgAudio) "ON" else "OFF"))
+                    }
+                    8 -> {
+                        Prefs.setHw(this, !Prefs.hw(this))
+                        Engine.loadAt(this, Engine.idx)
+                        showMsg("HW Decoder " + (if (Prefs.hw(this)) "ON" else "OFF"))
+                    }
+                    9 -> enterPip()
+                    10 -> Bg.battery(this)
+                    else -> {}
+                }
+            }
+            .show()
+    }
+
+    private fun pickSub() {
+        val i = Intent(Intent.ACTION_OPEN_DOCUMENT)
+        i.addCategory(Intent.CATEGORY_OPENABLE)
+        i.type = "*/*"
+        startActivityForResult(i, 7)
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != 7 || resultCode != RESULT_OK) return
+        val u = data?.data ?: return
+        try {
+            val nm = Engine.nameOf(this, u)
+            val ext = nm.substringAfterLast('.', "srt")
+            val f = File(cacheDir, "sub_" + System.currentTimeMillis() + "." + ext)
+            contentResolver.openInputStream(u)?.use { ins ->
+                f.outputStream().use { out -> ins.copyTo(out) }
+            }
+            mp.addSlave(0, Uri.fromFile(f), true)
+            showMsg("Subtitle successfully loaded")
+        } catch (e: Exception) {
+            Toast.makeText(this, "Failed to load subtitle: " + e.message, Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun addBookmark() {
+        val key = Engine.cur().toString()
+        val t = mp.getTime()
+        Prefs.setBms(this, key, (Prefs.bms(this, key) + t).sorted())
+        showMsg("Bookmark added at " + fmt(t))
+    }
+
+    private fun bookmarksDialog() {
+        val key = Engine.cur().toString()
+        val l = Prefs.bms(this, key)
+        if (l.isEmpty()) {
+            Toast.makeText(this, "No bookmarks saved for this media", Toast.LENGTH_SHORT).show()
+            return
+        }
+        val names = l.map { fmt(it) }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Saved Bookmarks")
+            .setItems(names) { _, i ->
+                mp.setTime(l[i])
+                showControls()
+            }
+            .setNeutralButton("Clear All") { _, _ -> Prefs.setBms(this, key, emptyList()) }
+            .show()
+    }
+
+    private fun abStep() {
+        if (abA < 0) {
+            abA = mp.getTime()
+            showMsg("Point A set at " + fmt(abA))
+        } else if (abB < 0) {
+            val t = mp.getTime()
+            if (t > abA) {
+                abB = t
+                showMsg("Point B set. Loop Active!")
+            } else {
+                showMsg("Point B must be after Point A")
+            }
+        } else {
+            abA = -1L
+            abB = -1L
+            showMsg("A-B Repeat Cleared")
+        }
+    }
+
+    private fun enterPip() {
+        if (locked) return
+        try {
+            val b = PictureInPictureParams.Builder()
+                .setAspectRatio(if (videoPortrait) Rational(9, 16) else Rational(16, 9))
+            enterPictureInPictureMode(b.build())
+        } catch (e: Exception) {
+            Toast.makeText(this, "PiP mode not supported", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        if (Engine.mp != null && Engine.isPlaying() && !locked && !Engine.bgAudio) enterPip()
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        if (isInPictureInPictureMode) hideControls() else showControls()
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (locked) {
+            showMsg("Screen is locked. Long press lock icon to unlock.")
+            return
+        }
+        super.onBackPressed()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
-        // Default unlocked user orientation so 16:9 or 9:16 opens without forced sensor rotation bugs
-        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-
-        am = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-        maxVol = max(1, am.getStreamMaxVolume(AudioManager.STREAM_MUSIC))
-
+        intent?.data?.let { Prefs.setLastPlayed(this, it.toString()) }
+        Cutout.enable(this)
         val cont = intent.getBooleanExtra("cont", false) && Engine.active && Engine.isVideo
         var uris: List<Uri> = emptyList()
         var names: List<String> = emptyList()
         var index = 0
-
         if (!cont) {
-            val u0 = extractIncomingUri()
+            val u0 = intent.data
             if (u0 == null) {
                 finish()
                 return
             }
-            Prefs.setLastPlayed(this, u0.toString())
             val l = intent.getStringArrayListExtra("list")
             uris = if (l != null && l.isNotEmpty()) l.map { Uri.parse(it) } else listOf(u0)
             val nm = intent.getStringArrayListExtra("names")
@@ -181,104 +383,67 @@ class PlayerActivity : Activity(), SurfaceHolder.Callback, IVLCVout.OnNewVideoLa
             index = intent.getIntExtra("idx", 0)
         }
 
-        val ic = Prefs.iconColor(this)
-        val ac = Prefs.accent(this)
-        val vBar = Prefs.videoBarColor(this)
-        val vTxt = Prefs.videoTextColor(this)
+        Engine.ensure(this)
+        Engine.bgAudio = Prefs.bgAudio(this)
 
-        root = FrameLayout(this)
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        hideBars()
+        audioMgr = getSystemService(AUDIO_SERVICE) as AudioManager
+
+        val ac = Prefs.accent(this)
+        val root = FrameLayout(this)
         root.setBackgroundColor(Color.BLACK)
 
-        // 1. Margin Atomic Animation View (Clips out the active video surface so it only renders in black margins)
-        marginAtomic = AtomicView(this, isVideoMarginMode = true)
-        root.addView(marginAtomic, FrameLayout.LayoutParams(MP, MP))
+        layout = VLCVideoLayout(this)
+        root.addView(layout, FrameLayout.LayoutParams(MP, MP))
 
-        // 2. Video Container & SurfaceView
-        videoContainer = FrameLayout(this)
-        surface = SurfaceView(this)
-        surface.holder.addCallback(this)
-        videoContainer.addView(surface, FrameLayout.LayoutParams(MP, MP, Gravity.CENTER))
-        root.addView(videoContainer, FrameLayout.LayoutParams(MP, MP, Gravity.CENTER))
+        touchView = View(this)
+        root.addView(touchView, FrameLayout.LayoutParams(MP, MP))
 
-        // Exclude actual video SurfaceView from atomic animation so animation only draws in the blank black margins
-        marginAtomic.excludeView(surface)
+        msgTv = TextView(this)
+        msgTv.textSize = 18f
+        msgTv.setTextColor(Color.WHITE)
+        val msgBg = GradientDrawable()
+        msgBg.setColor(0xCC000000.toInt())
+        msgBg.cornerRadius = dp(8).toFloat()
+        msgTv.background = msgBg
+        msgTv.setPadding(dp(20), dp(10), dp(20), dp(10))
+        msgTv.visibility = View.GONE
+        root.addView(msgTv, FrameLayout.LayoutParams(WC, WC, Gravity.CENTER))
 
-        // 3. Touch Gesture Layer (Pinch-to-Zoom strictly isolated from Volume / Brightness / Seek)
-        scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
-            override fun onScaleBegin(detector: ScaleGestureDetector): Boolean {
-                isZooming = true
-                touchMode = 0
-                zoomCooldownUntil = SystemClock.uptimeMillis() + 250L
-                return true
-            }
-
-            override fun onScale(detector: ScaleGestureDetector): Boolean {
-                isZooming = true
-                zoomCooldownUntil = SystemClock.uptimeMillis() + 250L
-                zoomScale = (zoomScale * detector.scaleFactor).coerceIn(0.5f, 3.0f)
-                surface.scaleX = zoomScale
-                surface.scaleY = zoomScale
-                showCenterToast("Zoom: " + (zoomScale * 100).roundToInt() + "%")
-                marginAtomic.invalidate()
-                return true
-            }
-
-            override fun onScaleEnd(detector: ScaleGestureDetector) {
-                isZooming = false
-                zoomCooldownUntil = SystemClock.uptimeMillis() + 250L
-            }
-        })
-
-        val touchLayer = View(this)
-        touchLayer.setOnTouchListener { _, ev -> handleTouch(ev) }
-        root.addView(touchLayer, FrameLayout.LayoutParams(MP, MP))
-
-        // 4. UI Controls Overlay
-        uiOverlay = FrameLayout(this)
-
-        // Top Bar
         topBar = LinearLayout(this)
         topBar.gravity = Gravity.CENTER_VERTICAL
-        topBar.setBackgroundColor(vBar)
-        topBar.setPadding(dp(8), dp(20), dp(8), dp(8))
-        topBar.addView(ib("\u2190", 22f, ic) { finish() })
-
+        topBar.setBackgroundColor(Prefs.videoBarColor(this))
+        topBar.setPadding(dp(20), dp(8), dp(20), dp(8))
+        topBar.addView(ib("\u2190", 22f) { finish() })
         titleTv = TextView(this)
+        titleTv.setTextColor(Prefs.videoTextColor(this))
         titleTv.textSize = 15f
-        titleTv.setTextColor(vTxt)
-        titleTv.setTypeface(null, Typeface.BOLD)
         titleTv.maxLines = 1
         titleTv.ellipsize = TextUtils.TruncateAt.END
         topBar.addView(titleTv, LinearLayout.LayoutParams(0, WC, 1f))
+        topBar.addView(ib("\uD83D\uDD04", 20f) {
+            requestedOrientation =
+                if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
+                    ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            showControls()
+        })
+        root.addView(topBar, FrameLayout.LayoutParams(MP, WC, Gravity.TOP))
 
-        topBar.addView(ib("\uD83D\uDD16", 18f, ic) { bookmarksDialog() })
-        topBar.addView(ib("\uD83D\uDCF1", 18f, ic) { toggleOrientation() })
-        if (Build.VERSION.SDK_INT >= 26) {
-            topBar.addView(ib("PiP", 13f, ic) { enterPip() })
-        }
-        uiOverlay.addView(topBar, FrameLayout.LayoutParams(MP, WC, Gravity.TOP))
+        controls = LinearLayout(this)
+        controls.orientation = LinearLayout.VERTICAL
+        controls.setBackgroundColor(0x99000000.toInt())
+        controls.setPadding(dp(20), dp(4), dp(20), dp(12))
 
-        // Lock Button
-        lockBtn = ib("\uD83D\uDD13", 22f, ic) { toggleLock() }
-        val lockLp = FrameLayout.LayoutParams(WC, WC, Gravity.CENTER_VERTICAL or Gravity.START)
-        lockLp.setMargins(dp(14), 0, 0, 0)
-        uiOverlay.addView(lockBtn, lockLp)
-
-        // Bottom Bar
-        bottomBar = LinearLayout(this)
-        bottomBar.orientation = LinearLayout.VERTICAL
-        bottomBar.setBackgroundColor(vBar)
-        bottomBar.setPadding(dp(12), dp(8), dp(12), dp(16))
-
-        // Seek Row
         val seekRow = LinearLayout(this)
         seekRow.gravity = Gravity.CENTER_VERTICAL
         curTv = TextView(this)
-        curTv.setTextColor(vTxt)
+        curTv.setTextColor(Color.WHITE)
         curTv.textSize = 12f
         curTv.text = "0:00"
         durTv = TextView(this)
-        durTv.setTextColor(vTxt)
+        durTv.setTextColor(Color.WHITE)
         durTv.textSize = 12f
         durTv.text = "0:00"
         seek = SeekBar(this)
@@ -286,563 +451,239 @@ class PlayerActivity : Activity(), SurfaceHolder.Callback, IVLCVout.OnNewVideoLa
         seek.thumbTintList = ColorStateList.valueOf(ac)
         seek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
-                if (fromUser) {
-                    resetHideTimer()
-                    curTv.text = fmt(p.toLong())
-                }
+                if (fromUser) curTv.text = fmt(p.toLong())
             }
-
             override fun onStartTrackingTouch(s: SeekBar?) {
                 userSeeking = true
-                resetHideTimer()
+                ui.removeCallbacks(hideRun)
             }
-
             override fun onStopTrackingTouch(s: SeekBar?) {
-                Engine.seekTo((s?.progress ?: 0).toLong())
+                mp.setTime((s?.progress ?: 0).toLong())
                 userSeeking = false
-                resetHideTimer()
+                showControls()
             }
         })
         seekRow.addView(curTv)
         seekRow.addView(seek, LinearLayout.LayoutParams(0, WC, 1f))
         seekRow.addView(durTv)
-        bottomBar.addView(seekRow, LinearLayout.LayoutParams(MP, WC))
+        controls.addView(seekRow)
 
-        // Main Transport Row
-        val tr = LinearLayout(this)
-        tr.gravity = Gravity.CENTER
-        val seekDelta = Prefs.seekSec(this)
-        tr.addView(ib("\u23EE", 24f, ic) { Engine.prev(this) })
-        tr.addView(ib("-" + seekDelta + "s", 14f, ic) { skipBy(-seekDelta * 1000L) })
+        val trRow = LinearLayout(this)
+        trRow.gravity = Gravity.CENTER
+        trRow.addView(ib("\u23EE", 22f) {
+            if (Engine.idx > 0) Engine.loadAt(this, Engine.idx - 1)
+            else Toast.makeText(this, "First item", Toast.LENGTH_SHORT).show()
+        })
+        trRow.addView(ib("-${Prefs.seekSec(this)}s", 15f) {
+            seekBy((-Prefs.seekSec(this) * 1000).toLong())
+            showControls()
+        })
+        playBtn = ib("\u23F8", 24f) { togglePlay() }
+        val circle = GradientDrawable()
+        circle.shape = GradientDrawable.OVAL
+        circle.setColor(ac)
+        playBtn.background = circle
+        playBtn.setTextColor(contrast(ac))
+        val plp = LinearLayout.LayoutParams(dp(54), dp(54))
+        plp.setMargins(dp(12), 0, dp(12), 0)
+        trRow.addView(playBtn, plp)
+        trRow.addView(ib("+${Prefs.seekSec(this)}s", 15f) {
+            seekBy((Prefs.seekSec(this) * 1000).toLong())
+            showControls()
+        })
+        trRow.addView(ib("\u23ED", 22f) {
+            if (Engine.idx + 1 < Engine.items.size) Engine.loadAt(this, Engine.idx + 1)
+            else Toast.makeText(this, "Last item", Toast.LENGTH_SHORT).show()
+        })
+        controls.addView(trRow)
 
-        playBtn = ib("\u23F8", 26f, contrast(ac)) {
-            Engine.toggle(this)
-            updateProgress()
+        val exRow = LinearLayout(this)
+        exRow.gravity = Gravity.CENTER
+        exRow.addView(ib("1.0x", 14f) { b ->
+            speedIdx = (speedIdx + 1) % speeds.size
+            mp.setRate(speeds[speedIdx])
+            b.text = speeds[speedIdx].toString() + "x"
+            showControls()
+        })
+        fitBtn = ib("Fit", 14f) { b ->
+            scaleIdx = (scaleIdx + 1) % scales.size
+            mp.setVideoScale(scales[scaleIdx])
+            b.text = scaleNames[scaleIdx]
+            showControls()
         }
-        val playCircle = GradientDrawable()
-        playCircle.shape = GradientDrawable.OVAL
-        playCircle.setColor(ac)
-        playBtn.background = playCircle
-        val plp = LinearLayout.LayoutParams(dp(58), dp(58))
-        plp.setMargins(dp(16), dp(4), dp(16), dp(4))
-        tr.addView(playBtn, plp)
-
-        tr.addView(ib("+" + seekDelta + "s", 14f, ic) { skipBy(seekDelta * 1000L) })
-        tr.addView(ib("\u23ED", 24f, ic) { Engine.next(this) })
-        bottomBar.addView(tr, LinearLayout.LayoutParams(MP, WC))
-
-        // Bottom Extra Options Row (Speed up to 6x, Aspect Ratio, Margin Animation Toggle, Audio/Sub)
-        val hs = HorizontalScrollView(this)
-        hs.isHorizontalScrollBarEnabled = false
-        val ex = LinearLayout(this)
-        ex.gravity = Gravity.CENTER_VERTICAL
-
-        speedBtn = ib("1.0x", 13f, ic) { speedDialog() }
-        ex.addView(speedBtn)
-
-        ratioBtn = ib("Ratio: Native", 13f, ic) { cycleRatio() }
-        ex.addView(ratioBtn)
-
-        marginBtn = ib(
-            if (Prefs.playerMarginAnim(this)) "\u2728 Margin: ON" else "\u2728 Margin: OFF",
-            13f, ic
-        ) { b ->
-            val nextState = !Prefs.playerMarginAnim(this)
-            Prefs.setPlayerMarginAnim(this, nextState)
-            b.text = if (nextState) "\u2728 Margin: ON" else "\u2728 Margin: OFF"
-            marginAtomic.applyPrefs()
-            showCenterToast(if (nextState) "Margin Animation: ON" else "Margin Animation: OFF (Clean Black)")
+        exRow.addView(fitBtn)
+        val repBtn = ib("\uD83D\uDD01", 18f) { b ->
+            showMsg(RepeatUi.cycle(this, b))
+            showControls()
         }
-        ex.addView(marginBtn)
+        repBtn.setPadding(dp(8), dp(8), dp(8), dp(8))
+        RepeatUi.paint(this, repBtn)
+        exRow.addView(repBtn)
+        val shufBtn = ib("\uD83D\uDD00", 18f) { b ->
+            Modes.setShuffle(this, true, !Modes.shuffle(this, true))
+            b.alpha = if (Modes.shuffle(this, true)) 1f else 0.35f
+            showMsg(if (Modes.shuffle(this, true)) "Shuffle: On" else "Shuffle: Off")
+            showControls()
+        }
+        shufBtn.setPadding(dp(8), dp(8), dp(8), dp(8))
+        shufBtn.alpha = if (Modes.shuffle(this, true)) 1f else 0.35f
+        exRow.addView(shufBtn)
+        exRow.addView(ib("Audio", 14f) {
+            pickTrack("Audio Track", mp.getAudioTracks()) { id -> mp.setAudioTrack(id) }
+        })
+        exRow.addView(ib("Sub", 14f) {
+            pickTrack("Subtitles", mp.getSpuTracks()) { id -> mp.setSpuTrack(id) }
+        })
+        exRow.addView(ib("\u2699\uFE0F", 18f) { showMenu() })
+        controls.addView(exRow)
+        root.addView(controls, FrameLayout.LayoutParams(MP, WC, Gravity.BOTTOM))
 
-        ex.addView(ib("100% Zoom", 13f, ic) {
-            zoomScale = 1.0f
-            surface.scaleX = 1.0f
-            surface.scaleY = 1.0f
-            marginAtomic.invalidate()
-            showCenterToast("Zoom Reset: 100%")
+        lockBtn = ib("\uD83D\uDD13", 22f) { b ->
+            if (locked) {
+                showMsg("Long press to unlock screen")
+            } else {
+                locked = true
+                b.text = "\uD83D\uDD12"
+                topBar.visibility = View.GONE
+                controls.visibility = View.GONE
+                showMsg("Screen Locked")
+            }
+            showControls()
+        }
+        lockBtn.setOnLongClickListener {
+            if (locked) {
+                locked = false
+                lockBtn.text = "\uD83D\uDD13"
+                showMsg("Screen Unlocked")
+                showControls()
+            }
+            true
+        }
+        val llp = FrameLayout.LayoutParams(WC, WC, Gravity.START or Gravity.CENTER_VERTICAL)
+        llp.setMargins(dp(20), 0, 0, 0)
+        root.addView(lockBtn, llp)
+
+        setContentView(root)
+        Cutout.padControls(root, topBar, controls, lockBtn)
+
+        try {
+            mp.detachViews()
+        } catch (e: Exception) {
+        }
+        mp.attachViews(layout, null, true, false)
+        Engine.vlayout = layout
+        Engine.listener = lis
+
+        val scaleDetector = ScaleGestureDetector(this, object : ScaleGestureDetector.SimpleOnScaleGestureListener() {
+            override fun onScale(detector: ScaleGestureDetector): Boolean {
+                videoScaleFactor *= detector.scaleFactor
+                videoScaleFactor = videoScaleFactor.coerceIn(0.5f, 3.5f)
+                layout.scaleX = videoScaleFactor
+                layout.scaleY = videoScaleFactor
+                showMsg("Zoom: " + Math.round(videoScaleFactor * 100) + "%")
+                return true
+            }
         })
 
-        ex.addView(ib("Audio", 13f, ic) { Dialogs.audioTracks(this) })
-        ex.addView(ib("Sub", 13f, ic) { Dialogs.subTracks(this) })
-        ex.addView(ib("EQ", 13f, ic) { Dialogs.eq(this) })
-        hs.addView(ex)
-        bottomBar.addView(hs, LinearLayout.LayoutParams(MP, WC))
-
-        uiOverlay.addView(bottomBar, FrameLayout.LayoutParams(MP, WC, Gravity.BOTTOM))
-        root.addView(uiOverlay, FrameLayout.LayoutParams(MP, MP))
-
-        // Center Status Toast
-        centerToast = TextView(this)
-        centerToast.textSize = 16f
-        centerToast.setTextColor(Color.WHITE)
-        centerToast.setTypeface(null, Typeface.BOLD)
-        centerToast.setPadding(dp(18), dp(10), dp(18), dp(10))
-        val toastBg = GradientDrawable()
-        toastBg.setColor(0xCC000000.toInt())
-        toastBg.cornerRadius = dp(12).toFloat()
-        centerToast.background = toastBg
-        centerToast.visibility = View.GONE
-        root.addView(centerToast, FrameLayout.LayoutParams(WC, WC, Gravity.CENTER))
-
-        if (Prefs.rgbBorder(this)) root.addView(RgbBorderView(this), FrameLayout.LayoutParams(MP, MP))
-        setContentView(root)
-        hideSystemBars()
-
-        Engine.listener = lis
-        if (!cont) {
-            Engine.setQueue(this, uris, names, index, true)
-        }
-        applySmoothAvSyncSettings()
-        onTrackLoaded()
-        resetHideTimer()
-    }
-
-    // Ensures smooth Audio-Video sync at 1.5x, 2x, 2.5x, 3x, 4x, 6x without stuttering
-    private fun applySmoothAvSyncSettings() {
-        try {
-            val p = Engine.mp ?: return
-            p.media?.let { m ->
-                m.addOption(":audio-time-stretch")
-                m.addOption(":avcodec-fast")
-                m.addOption(":avcodec-skiploopfilter=4")
-                m.addOption(":file-caching=1500")
-                m.addOption(":network-caching=1500")
-                m.addOption(":clock-jitter=0")
-                m.addOption(":clock-synchro=0")
+        val gd = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+            override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+                if (controlsVisible()) hideControls() else showControls()
+                return true
             }
-        } catch (e: Exception) {
-        }
-    }
-
-    private fun handleTouch(ev: MotionEvent): Boolean {
-        // Always feed ScaleGestureDetector first
-        scaleDetector.onTouchEvent(ev)
-
-        val now = SystemClock.uptimeMillis()
-
-        // Strictly isolate multi-touch / zooming from volume, brightness, and seeking
-        if (ev.pointerCount > 1 || isZooming || scaleDetector.isInProgress || now < zoomCooldownUntil) {
-            touchMode = 0
-            if (ev.pointerCount > 1) zoomCooldownUntil = now + 220L
-            return true
-        }
-
-        when (ev.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                downX = ev.x
-                downY = ev.y
-                touchMode = 0
-                startVol = am.getStreamVolume(AudioManager.STREAM_MUSIC)
-                val lp = window.attributes
-                startBright = if (lp.screenBrightness > 0f) lp.screenBrightness else 0.5f
-                startSeekPos = Engine.mp?.time ?: 0L
-            }
-
-            MotionEvent.ACTION_MOVE -> {
+            override fun onDoubleTap(e: MotionEvent): Boolean {
                 if (locked) return true
-                val dx = ev.x - downX
-                val dy = ev.y - downY
-                val slop = dp(18).toFloat()
-
-                if (touchMode == 0) {
-                    if (abs(dx) > slop && abs(dx) > abs(dy) * 1.3f) {
-                        touchMode = 1 // Horizontal Seek
-                    } else if (abs(dy) > slop && abs(dy) > abs(dx) * 1.3f) {
-                        touchMode = if (downX < root.width * 0.5f) 3 else 2 // Left = Brightness, Right = Volume
+                val w = touchView.width
+                val sMs = (Prefs.seekSec(this@PlayerActivity) * 1000).toLong()
+                if (e.x < w / 3f) seekBy(-sMs)
+                else if (e.x > w * 2f / 3f) seekBy(sMs)
+                else togglePlay()
+                return true
+            }
+            override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
+                if (locked || e1 == null) return false
+                val w = touchView.width.toFloat()
+                val hgt = touchView.height.toFloat()
+                if (gMode == 0) {
+                    gMode = if (Math.abs(dx) > Math.abs(dy)) 3 else if (e1.x < w / 2f) 1 else 2
+                    if (gMode == 3) seekTarget = mp.getTime()
+                    if (gMode == 1) {
+                        val b = window.attributes.screenBrightness
+                        brightCur = if (b < 0f) 0.5f else b
+                    }
+                    if (gMode == 2) {
+                        val mx = audioMgr.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                        volCur = audioMgr.getStreamVolume(AudioManager.STREAM_MUSIC).toFloat() / mx
                     }
                 }
-
-                when (touchMode) {
-                    1 -> {
-                        val len = Engine.mp?.length ?: 0L
-                        if (len > 0L) {
-                            val deltaMs = ((dx / root.width.coerceAtLeast(1)) * 90_000f).toLong()
-                            val target = (startSeekPos + deltaMs).coerceIn(0L, len)
-                            Engine.seekTo(target)
-                            showCenterToast(fmt(target) + " / " + fmt(len))
-                        }
-                    }
-                    2 -> {
-                        val deltaV = ((-dy / (root.height.coerceAtLeast(1) * 0.65f)) * maxVol).roundToInt()
-                        val newVol = (startVol + deltaV).coerceIn(0, maxVol)
-                        am.setStreamVolume(AudioManager.STREAM_MUSIC, newVol, 0)
-                        val pct = ((newVol.toFloat() / maxVol) * 100).roundToInt()
-                        showCenterToast("\uD83D\uDD0A Volume: $pct%")
-                    }
-                    3 -> {
-                        val deltaB = -dy / (root.height.coerceAtLeast(1) * 0.65f)
-                        val newB = (startBright + deltaB).coerceIn(0.05f, 1.0f)
-                        val lp = window.attributes
-                        lp.screenBrightness = newB
-                        window.attributes = lp
-                        val pct = (newB * 100).roundToInt()
-                        showCenterToast("\u2600\uFE0F Brightness: $pct%")
-                    }
+                if (gMode == 3) {
+                    val len = Math.max(0L, mp.getLength())
+                    seekTarget = (seekTarget - (dx * 100f).toLong()).coerceIn(0L, len)
+                    showMsg(fmt(seekTarget) + " / " + fmt(len))
+                } else if (gMode == 1) {
+                    brightCur = (brightCur + dy / hgt * 1.5f).coerceIn(0.02f, 1f)
+                    val lp = window.attributes
+                    lp.screenBrightness = brightCur
+                    window.attributes = lp
+                    showMsg("\u2600\uFE0F " + Math.round(brightCur * 100) + "%")
+                } else if (gMode == 2) {
+                    volCur = (volCur + dy / hgt * 1.5f).coerceIn(0f, 1f)
+                    val mx = audioMgr.getStreamMaxVolume(AudioManager.STREAM_MUSIC)
+                    audioMgr.setStreamVolume(AudioManager.STREAM_MUSIC, Math.round(volCur * mx), 0)
+                    showMsg("\uD83D\uDD0A " + Math.round(volCur * 100) + "%")
                 }
+                return true
             }
+        })
 
-            MotionEvent.ACTION_UP -> {
-                if (touchMode == 0) {
-                    val tapTime = SystemClock.uptimeMillis()
-                    if (!locked && tapTime - lastTapTime < 280L && abs(ev.x - lastTapX) < dp(80)) {
-                        val seekMs = Prefs.seekSec(this) * 1000L
-                        if (ev.x < root.width * 0.4f) {
-                            skipBy(-seekMs)
-                        } else if (ev.x > root.width * 0.6f) {
-                            skipBy(seekMs)
-                        } else {
-                            Engine.toggle(this)
-                            updateProgress()
-                        }
-                        lastTapTime = 0L
-                    } else {
-                        lastTapTime = tapTime
-                        lastTapX = ev.x
-                        if (controlsVisible) hideControls() else showControls()
-                    }
-                }
-                touchMode = 0
-            }
-
-            MotionEvent.ACTION_CANCEL -> {
-                touchMode = 0
-            }
-        }
-        return true
-    }
-
-    private fun skipBy(deltaMs: Long) {
-        val p = Engine.mp ?: return
-        val len = p.length
-        if (len <= 0L) return
-        val next = (p.time + deltaMs).coerceIn(0L, len)
-        Engine.seekTo(next)
-        showCenterToast((if (deltaMs > 0) "+" else "") + (deltaMs / 1000) + "s (" + fmt(next) + ")")
-        updateProgress()
-    }
-
-    private fun showCenterToast(msg: String) {
-        centerToast.text = msg
-        centerToast.visibility = View.VISIBLE
-        ui.removeCallbacks(hideToastRun)
-        ui.postDelayed(hideToastRun, 900)
-    }
-
-    private fun toggleLock() {
-        locked = !locked
-        lockBtn.text = if (locked) "\uD83D\uDD12" else "\uD83D\uDD13"
-        topBar.visibility = if (locked) View.GONE else View.VISIBLE
-        bottomBar.visibility = if (locked) View.GONE else View.VISIBLE
-        showCenterToast(if (locked) "Controls Locked" else "Controls Unlocked")
-        resetHideTimer()
-    }
-
-    private fun showControls() {
-        controlsVisible = true
-        lockBtn.visibility = View.VISIBLE
-        if (!locked) {
-            topBar.visibility = View.VISIBLE
-            bottomBar.visibility = View.VISIBLE
-        }
-        resetHideTimer()
-    }
-
-    private fun hideControls() {
-        controlsVisible = false
-        topBar.visibility = View.GONE
-        bottomBar.visibility = View.GONE
-        lockBtn.visibility = View.GONE
-        hideSystemBars()
-    }
-
-    private fun resetHideTimer() {
-        ui.removeCallbacks(hideControlsRun)
-        if (controlsVisible) ui.postDelayed(hideControlsRun, 4000)
-    }
-
-    private fun hideSystemBars() {
-        if (Build.VERSION.SDK_INT >= 30) {
-            window.insetsController?.let {
-                it.hide(WindowInsets.Type.statusBars() or WindowInsets.Type.navigationBars())
-                it.systemBarsBehavior = WindowInsetsController.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
-            }
-        } else {
-            @Suppress("DEPRECATION")
-            window.decorView.systemUiVisibility = (
-                View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
-                    or View.SYSTEM_UI_FLAG_FULLSCREEN
-                    or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
-                    or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                    or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
-                    or View.SYSTEM_UI_FLAG_LAYOUT_STABLE
-                )
-        }
-    }
-
-    private fun toggleOrientation() {
-        val cur = resources.configuration.orientation
-        requestedOrientation = if (cur == Configuration.ORIENTATION_LANDSCAPE) {
-            ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
-        } else {
-            ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE
-        }
-    }
-
-    private fun cycleRatio() {
-        ratioMode = (ratioMode + 1) % ratioNames.size
-        ratioBtn.text = "Ratio: " + ratioNames[ratioMode]
-        applyVideoLayout()
-        showCenterToast("Aspect Ratio: " + ratioNames[ratioMode])
-    }
-
-    // Fits video cleanly into its native aspect ratio (16:9, 9:16, etc.) or user-selected size
-    private fun applyVideoLayout() {
-        val parentW = root.width
-        val parentH = root.height
-        if (parentW <= 0 || parentH <= 0) return
-
-        val natW = if (videoW > 0) videoW else 16
-        val natH = if (videoH > 0) videoH else 9
-        val nativeRatio = natW.toFloat() / natH.toFloat()
-        val screenRatio = parentW.toFloat() / parentH.toFloat()
-
-        var targetW = parentW
-        var targetH = parentH
-
-        when (ratioMode) {
-            0 -> { // Native Default Aspect Ratio (16:9 stays 16:9, 9:16 stays 9:16)
-                if (nativeRatio > screenRatio) {
-                    targetW = parentW
-                    targetH = (parentW / nativeRatio).roundToInt()
-                } else {
-                    targetH = parentH
-                    targetW = (parentH * nativeRatio).roundToInt()
-                }
-            }
-            1 -> { // Fill Screen
-                targetW = parentW
-                targetH = parentH
-            }
-            2 -> { // 16:9
-                val r = 16f / 9f
-                if (r > screenRatio) {
-                    targetW = parentW
-                    targetH = (parentW / r).roundToInt()
-                } else {
-                    targetH = parentH
-                    targetW = (parentH * r).roundToInt()
-                }
-            }
-            3 -> { // 9:16
-                val r = 9f / 16f
-                if (r > screenRatio) {
-                    targetW = parentW
-                    targetH = (parentW / r).roundToInt()
-                } else {
-                    targetH = parentH
-                    targetW = (parentH * r).roundToInt()
-                }
-            }
-            4 -> { // 4:3
-                val r = 4f / 3f
-                if (r > screenRatio) {
-                    targetW = parentW
-                    targetH = (parentW / r).roundToInt()
-                } else {
-                    targetH = parentH
-                    targetW = (parentH * r).roundToInt()
-                }
-            }
-            5 -> { // Small 75% (Reveals Diamond Bonding Animation in surrounding black area)
-                if (nativeRatio > screenRatio) {
-                    targetW = (parentW * 0.75f).roundToInt()
-                    targetH = (targetW / nativeRatio).roundToInt()
-                } else {
-                    targetH = (parentH * 0.75f).roundToInt()
-                    targetW = (targetH * nativeRatio).roundToInt()
-                }
-            }
-            6 -> { // Mini 55% (Reveals wide Diamond Bonding Animation margin around video)
-                if (nativeRatio > screenRatio) {
-                    targetW = (parentW * 0.55f).roundToInt()
-                    targetH = (targetW / nativeRatio).roundToInt()
-                } else {
-                    targetH = (parentH * 0.55f).roundToInt()
-                    targetW = (targetH * nativeRatio).roundToInt()
-                }
-            }
+        touchView.setOnTouchListener { _, ev ->
+            scaleDetector.onTouchEvent(ev)
+            gd.onTouchEvent(ev)
+            if (ev.action == MotionEvent.ACTION_UP || ev.action == MotionEvent.ACTION_CANCEL) endGesture()
+            true
         }
 
-        val lp = FrameLayout.LayoutParams(targetW.coerceAtLeast(100), targetH.coerceAtLeast(100), Gravity.CENTER)
-        surface.layoutParams = lp
-        try {
-            Engine.mp?.vlcVout?.setWindowSize(targetW.coerceAtLeast(100), targetH.coerceAtLeast(100))
-            Engine.mp?.aspectRatio = null
-            Engine.mp?.scale = 0f
-        } catch (e: Exception) {
-        }
-        surface.post { marginAtomic.invalidate() }
-    }
-
-    private fun speedDialog() {
-        val labels = Array<CharSequence>(speeds.size) { i ->
-            String.format("%.2fx", speeds[i]).replace(".00x", ".0x").replace("50x", "5x")
-        }
-        AlertDialog.Builder(this)
-            .setTitle("Playback Speed (Smooth A/V Sync)")
-            .setItems(labels) { _, which ->
-                speedIdx = which
-                val sp = speeds[which]
-                applySmoothAvSyncSettings()
-                Engine.mp?.rate = sp
-                speedBtn.text = String.format("%.1fx", sp)
-                showCenterToast("Speed: " + String.format("%.2fx", sp))
-            }
-            .show()
-    }
-
-    private fun bookmarksDialog() {
-        val key = Engine.cur().toString()
-        val list = Prefs.bms(this, key)
-        val items = ArrayList<CharSequence>()
-        items.add("\u2795 Add Bookmark at " + fmt(Engine.mp?.time ?: 0L))
-        for (ms in list) items.add("\uD83D\uDD16 Jump to " + fmt(ms))
-        if (list.isNotEmpty()) items.add("\uD83D\uDDD1 Clear All Bookmarks")
-
-        val arr = items.toTypedArray<CharSequence>()
-        AlertDialog.Builder(this)
-            .setTitle("Video Bookmarks")
-            .setItems(arr) { _, idx ->
-                if (idx == 0) {
-                    val now = Engine.mp?.time ?: 0L
-                    Prefs.setBms(this, key, (list + now).distinct().sorted())
-                    Toast.makeText(this, "Bookmark saved at " + fmt(now), Toast.LENGTH_SHORT).show()
-                } else if (list.isNotEmpty() && idx == arr.size - 1) {
-                    Prefs.setBms(this, key, emptyList())
-                    Toast.makeText(this, "Bookmarks cleared", Toast.LENGTH_SHORT).show()
-                } else {
-                    val target = list.getOrNull(idx - 1) ?: return@setItems
-                    Engine.seekTo(target)
-                }
-            }
-            .show()
-    }
-
-    private fun onTrackLoaded() {
-        if (!Engine.active) {
-            finish()
-            return
-        }
-        val curUri = Engine.items.getOrNull(Engine.idx)
-        if (curUri != null) Prefs.setLastPlayed(this, curUri.toString())
-        titleTv.text = Engine.title
-        applySmoothAvSyncSettings()
-        updateProgress()
-    }
-
-    private fun updateProgress() {
-        val p = Engine.mp ?: return
-        val len = p.length
-        val t = p.time
-        if (len > 0) {
-            if (!userSeeking) {
-                seek.max = len.toInt()
-                seek.progress = t.toInt()
-            }
-            durTv.text = fmt(len)
-        }
-        if (!userSeeking) curTv.text = fmt(t)
-        playBtn.text = if (p.isPlaying) "\u23F8" else "\u25B6"
-    }
-
-    private fun attachSurface() {
-        val p = Engine.mp ?: return
-        if (attached) return
-        val vout = p.vlcVout
-        vout.setVideoView(surface)
-        vout.attachViews(this)
-        attached = true
-        root.post { applyVideoLayout() }
-    }
-
-    private fun detachSurface() {
-        if (!attached) return
-        try {
-            Engine.mp?.vlcVout?.detachViews()
-        } catch (e: Exception) {
-        }
-        attached = false
-    }
-
-    override fun surfaceCreated(holder: SurfaceHolder) {
-        attachSurface()
-    }
-
-    override fun surfaceChanged(holder: SurfaceHolder, format: Int, width: Int, height: Int) {
-        try {
-            Engine.mp?.vlcVout?.setWindowSize(width, height)
-        } catch (e: Exception) {
-        }
-        marginAtomic.invalidate()
-    }
-
-    override fun surfaceDestroyed(holder: SurfaceHolder) {
-        detachSurface()
-    }
-
-    override fun onNewVideoLayout(
-        vout: IVLCVout?,
-        width: Int,
-        height: Int,
-        visibleWidth: Int,
-        visibleHeight: Int,
-        sarNum: Int,
-        sarDen: Int
-    ) {
-        if (width > 0 && height > 0) {
-            videoW = if (visibleWidth > 0) visibleWidth else width
-            videoH = if (visibleHeight > 0) visibleHeight else height
-            runOnUiThread { applyVideoLayout() }
-        }
-    }
-
-    override fun onConfigurationChanged(newConfig: Configuration) {
-        super.onConfigurationChanged(newConfig)
-        root.postDelayed({ applyVideoLayout() }, 80)
-    }
-
-    private fun enterPip() {
-        if (Build.VERSION.SDK_INT >= 26) {
-            try {
-                val r = Rational(
-                    (if (videoW > 0) videoW else 16).coerceIn(1, 239),
-                    (if (videoH > 0) videoH else 9).coerceIn(1, 100)
-                )
-                enterPictureInPictureMode(PictureInPictureParams.Builder().setAspectRatio(r).build())
-            } catch (e: Exception) {
-            }
-        }
+        if (!cont) layout.post { Engine.setQueue(this, uris, names, index, true) } else onItem()
+        showControls()
+        ui.post(tick)
     }
 
     override fun onResume() {
         super.onResume()
-        marginAtomic.applyPrefs()
-        ui.post(tick)
+        PlaybackService.stop(this)
+        Bg.restoreVideo()
+        VideoGuard.start(layout)
     }
 
     override fun onPause() {
         super.onPause()
-        ui.removeCallbacks(tick)
-        val curKey = Engine.cur().toString()
-        val pos = Engine.mp?.time ?: 0L
-        if (curKey.isNotEmpty() && pos > 0L) Prefs.setPos(this, curKey, pos)
+        Engine.saveProgress()
+        VideoGuard.stop()
+        if (Engine.bgAudio && Engine.isPlaying()) PlaybackService.start(this)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        if (!Engine.bgAudio && Engine.isPlaying()) Engine.pause()
+        if (Engine.bgAudio && Engine.isPlaying()) {
+            Bg.toAudioOnly()
+            PlaybackService.start(this)
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        detachSurface()
         ui.removeCallbacksAndMessages(null)
         if (Engine.listener === lis) Engine.listener = null
+        try {
+            if (Engine.vlayout === layout) {
+                Engine.mp?.detachViews()
+                Engine.vlayout = null
+            }
+        } catch (e: Exception) {
+        }
+        if (Engine.active && Engine.isPlaying()) {
+            PlaybackService.start(this)
+        }
     }
 }

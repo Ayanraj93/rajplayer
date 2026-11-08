@@ -178,4 +178,7 @@ object Prefs {
         if (v.isEmpty()) e.remove("bm_" + key) else e.putString("bm_" + key, v.joinToString(","))
         e.apply()
     }
+
+    fun lastPlayedUri(c: Context): String? = p(c).getString("last_played_uri", null)
+    fun setLastPlayedUri(c: Context, uri: String?) { p(c).edit().putString("last_played_uri", uri).apply() }
 }
