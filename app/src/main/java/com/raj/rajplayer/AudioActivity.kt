@@ -6,6 +6,7 @@ import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Color
 import android.graphics.Outline
+import android.graphics.Typeface
 import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
@@ -39,7 +40,6 @@ class AudioActivity : Activity() {
     private lateinit var repBtn: TextView
     private lateinit var artImg: ImageView
     private lateinit var artNote: TextView
-    private var musicRgbBorder: View? = null
 
     private val ui = Handler(Looper.getMainLooper())
     private val pool = Executors.newSingleThreadExecutor()
@@ -47,6 +47,7 @@ class AudioActivity : Activity() {
     private var artKey = ""
     private val speeds = floatArrayOf(0.75f, 1f, 1.25f, 1.5f, 2f)
     private var speedIdx = 1
+    private val rgbTargets = ArrayList<(Int) -> Unit>()
 
     private val lis = object : Engine.Listener {
         override fun onItemChanged() {
@@ -61,27 +62,20 @@ class AudioActivity : Activity() {
         }
     }
 
-    private val rgbHandler = Handler(Looper.getMainLooper())
-    private var rgbHue = 0f
-    private val rgbRunnable = object : Runnable {
+    private val rgbTick = object : Runnable {
         override fun run() {
-            if (Prefs.rgbAnim(this@AudioActivity)) {
-                rgbHue = (rgbHue + 6f) % 360f
-                val rgbColor = Color.HSVToColor(floatArrayOf(rgbHue, 1f, 1f))
-                Prefs.setAccent(this@AudioActivity, rgbColor)
-                val gd = GradientDrawable()
-                gd.setStroke(dp(3), rgbColor)
-                gd.cornerRadius = dp(20).toFloat()
-                musicRgbBorder?.background = gd
+            if (rgbTargets.isNotEmpty()) {
+                val col = Theme.rgbNow(0f)
+                for (t in rgbTargets) t(col)
+                ui.postDelayed(this, 70)
             }
-            rgbHandler.postDelayed(this, 50)
         }
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun fmt(ms: Long): String {
-        val s = if (ms < 0) 0 else ms / 1000
+        val s = if (ms < 0) 0L else ms / 1000
         val hh = s / 3600
         val mm = (s % 3600) / 60
         val ss = s % 60
@@ -120,8 +114,13 @@ class AudioActivity : Activity() {
             index = intent.getIntExtra("idx", 0)
         }
 
-        val tc = Prefs.text(this)
+        val tc = Prefs.audioTextColor(this)
+        val ic = Prefs.iconColor(this)
         val ac = Prefs.accent(this)
+        val bar = Prefs.audioBarColor(this)
+        val rgb = Prefs.themeMode(this) == "rgb"
+        val rgbAcc = rgb && !Prefs.hasOverride(this, Prefs.K_ACCENT)
+        val rgbTxt = rgb && !Prefs.hasOverride(this, Prefs.K_ATEXT)
 
         val root = FrameLayout(this)
         root.setBackgroundColor(Prefs.bg(this))
@@ -139,36 +138,39 @@ class AudioActivity : Activity() {
             }
         }
 
-        // Music interface border RGB glowing frame
-        val rgbBorderBox = FrameLayout(this)
-        val borderG = GradientDrawable()
-        borderG.setStroke(dp(3), ac)
-        borderG.cornerRadius = dp(20).toFloat()
-        rgbBorderBox.background = borderG
-        musicRgbBorder = rgbBorderBox
-        root.addView(rgbBorderBox, FrameLayout.LayoutParams(MP, MP))
+        // Atomic animation: background me, touch nahi pakadta
+        var atomic: AtomicView? = null
+        if (Prefs.atomicOn(this) && Prefs.themeMode(this) != "none") {
+            val av = AtomicView(this)
+            atomic = av
+            root.addView(av, FrameLayout.LayoutParams(MP, MP))
+        }
 
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
         col.gravity = Gravity.CENTER_HORIZONTAL
         col.setPadding(dp(24), dp(36), dp(24), dp(16))
 
+        // ---- top row (audio title bar) ----
         val top = LinearLayout(this)
         top.gravity = Gravity.CENTER_VERTICAL
-        top.addView(ib("\u2190", 24f, tc) { finish() })
+        top.setBackgroundColor(bar)
+        top.setPadding(dp(4), dp(2), dp(4), dp(2))
+        top.addView(ib("\u2190", 24f, ic) { finish() })
         val hdr = TextView(this)
         hdr.text = "NOW PLAYING"
         hdr.textSize = 13f
         hdr.setTextColor(tc)
         hdr.gravity = Gravity.CENTER
         top.addView(hdr, LinearLayout.LayoutParams(0, WC, 1f))
-        top.addView(ib("\u22EF", 24f, tc) { menu() })
-        top.addView(ib("\u2715", 20f, tc) {
+        top.addView(ib("\u22EF", 24f, ic) { menu() })
+        top.addView(ib("\u2715", 20f, ic) {
             Engine.stopAll(this)
             finish()
         })
         col.addView(top, LinearLayout.LayoutParams(MP, WC))
 
+        // ---- album art ----
         val artSize = Math.min(resources.displayMetrics.widthPixels - dp(64), dp(340))
         val artBox = FrameLayout(this)
         val g = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(ac, 0xFF000000.toInt()))
@@ -190,14 +192,16 @@ class AudioActivity : Activity() {
         val alp = LinearLayout.LayoutParams(artSize, artSize)
         alp.setMargins(0, dp(20), 0, dp(20))
         col.addView(artBox, alp)
+        atomic?.excludeView(artBox)
 
+        // ---- title ----
         titleTv = TextView(this)
         titleTv.textSize = 20f
         titleTv.setTextColor(tc)
         titleTv.gravity = Gravity.CENTER
         titleTv.maxLines = 2
         titleTv.ellipsize = TextUtils.TruncateAt.END
-        titleTv.setTypeface(null, android.graphics.Typeface.BOLD)
+        titleTv.setTypeface(null, Typeface.BOLD)
         col.addView(titleTv, LinearLayout.LayoutParams(MP, WC))
         subTv = TextView(this)
         subTv.textSize = 13f
@@ -206,6 +210,7 @@ class AudioActivity : Activity() {
         subTv.setPadding(0, dp(4), 0, dp(12))
         col.addView(subTv, LinearLayout.LayoutParams(MP, WC))
 
+        // ---- seek ----
         val seekRow = LinearLayout(this)
         seekRow.gravity = Gravity.CENTER_VERTICAL
         curTv = TextView(this)
@@ -238,18 +243,19 @@ class AudioActivity : Activity() {
         seekRow.addView(durTv)
         col.addView(seekRow, LinearLayout.LayoutParams(MP, WC))
 
+        // ---- transport ----
         val tr = LinearLayout(this)
         tr.gravity = Gravity.CENTER
-        shufBtn = ib("\uD83D\uDD00", 22f, tc) {
+        shufBtn = ib("\uD83D\uDD00", 22f, ic) {
             Prefs.setShuffle(this, !Prefs.shuffle(this))
             refreshModes()
         }
-        repBtn = ib("\uD83D\uDD01", 22f, tc) {
+        repBtn = ib("\uD83D\uDD01", 22f, ic) {
             Prefs.setRepeat(this, (Prefs.repeat(this) + 1) % 3)
             refreshModes()
         }
         tr.addView(shufBtn)
-        tr.addView(ib("\u23EE", 30f, tc) { Engine.prev(this) })
+        tr.addView(ib("\u23EE", 30f, ic) { Engine.prev(this) })
         playBtn = ib("\u23F8", 30f, contrast(ac)) { Engine.toggle(this) }
         val circle = GradientDrawable()
         circle.shape = GradientDrawable.OVAL
@@ -258,32 +264,43 @@ class AudioActivity : Activity() {
         val plp = LinearLayout.LayoutParams(dp(72), dp(72))
         plp.setMargins(dp(12), 0, dp(12), 0)
         tr.addView(playBtn, plp)
-        tr.addView(ib("\u23ED", 30f, tc) { Engine.next(this) })
+        tr.addView(ib("\u23ED", 30f, ic) { Engine.next(this) })
         tr.addView(repBtn)
         col.addView(tr, LinearLayout.LayoutParams(MP, WC))
 
+        // ---- extras ----
         val ex = LinearLayout(this)
         ex.gravity = Gravity.CENTER
         ex.setPadding(0, dp(12), 0, 0)
-        ex.addView(ib("1x", 14f, tc) { b ->
+        ex.addView(ib("1x", 14f, ic) { b ->
             speedIdx = (speedIdx + 1) % speeds.size
             Engine.mp?.setRate(speeds[speedIdx])
             b.text = speeds[speedIdx].toString() + "x"
         })
-        ex.addView(ib("EQ", 14f, tc) { Dialogs.eq(this) })
-        ex.addView(ib("Boost", 14f, tc) { Dialogs.boost(this) })
-        ex.addView(ib("Sleep", 14f, tc) { Dialogs.sleep(this) })
-        ex.addView(ib("Queue", 14f, tc) { queueDialog() })
+        ex.addView(ib("EQ", 14f, ic) { Dialogs.eq(this) })
+        ex.addView(ib("Boost", 14f, ic) { Dialogs.boost(this) })
+        ex.addView(ib("Sleep", 14f, ic) { Dialogs.sleep(this) })
+        ex.addView(ib("Queue", 14f, ic) { queueDialog() })
         col.addView(ex, LinearLayout.LayoutParams(MP, WC))
 
         root.addView(col, FrameLayout.LayoutParams(MP, MP))
+        if (Prefs.rgbBorder(this)) root.addView(RgbBorderView(this), FrameLayout.LayoutParams(MP, MP))
         setContentView(root)
+
+        // RGB theme: kuch cheezein rang badalti rehti hain
+        if (rgbAcc) {
+            rgbTargets.add { c ->
+                seek.progressTintList = ColorStateList.valueOf(c)
+                seek.thumbTintList = ColorStateList.valueOf(c)
+            }
+            rgbTargets.add { c -> g.setColors(intArrayOf(c, 0xFF000000.toInt())) }
+        }
+        if (rgbTxt) rgbTargets.add { c -> titleTv.setTextColor(c) }
 
         Engine.listener = lis
         if (!cont) Engine.setQueue(this, uris, names, index, false)
         onItem()
         refreshModes()
-        rgbHandler.post(rgbRunnable)
     }
 
     private fun refreshModes() {
@@ -349,6 +366,7 @@ class AudioActivity : Activity() {
             "\uD83D\uDD0A Audio Boost",
             "\u23F1\uFE0F Sleep Timer",
             "\uD83D\uDCC3 Songs Queue",
+            "\uD83D\uDD0B Allow Background (Battery)",
             "\u23F9 Stop & Close"
         )
         AlertDialog.Builder(this)
@@ -358,7 +376,8 @@ class AudioActivity : Activity() {
                     1 -> Dialogs.boost(this)
                     2 -> Dialogs.sleep(this)
                     3 -> queueDialog()
-                    4 -> {
+                    4 -> Power.request(this)
+                    5 -> {
                         Engine.stopAll(this)
                         finish()
                     }
@@ -383,18 +402,20 @@ class AudioActivity : Activity() {
     override fun onResume() {
         super.onResume()
         ui.post(tick)
+        ui.removeCallbacks(rgbTick)
+        if (rgbTargets.isNotEmpty()) ui.post(rgbTick)
         if (Engine.active) onItem()
     }
 
     override fun onPause() {
         super.onPause()
         ui.removeCallbacks(tick)
+        ui.removeCallbacks(rgbTick)
     }
 
     override fun onDestroy() {
         super.onDestroy()
         ui.removeCallbacksAndMessages(null)
-        rgbHandler.removeCallbacks(rgbRunnable)
         if (Engine.listener === lis) Engine.listener = null
     }
 }

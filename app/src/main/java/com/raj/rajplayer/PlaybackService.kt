@@ -101,6 +101,7 @@ class PlaybackService : Service() {
 
     fun refresh() {
         updateSession()
+        Power.wake(this, Engine.active && Engine.isPlaying())
         Bg.wake(this, Engine.active && Engine.isPlaying())
         try {
             if (Build.VERSION.SDK_INT >= 34) {
@@ -189,6 +190,7 @@ class PlaybackService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         if (instance === this) instance = null
+        Power.wake(this, false)
         Bg.wake(this, false)
         try {
             session?.release()

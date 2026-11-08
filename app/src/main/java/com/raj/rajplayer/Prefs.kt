@@ -3,45 +3,117 @@ package com.raj.rajplayer
 import android.content.Context
 import android.graphics.Color
 
+// Theme presets: rgb | pink | dark | light | gradient | none
+object Theme {
+    val MODES = arrayOf("rgb", "pink", "dark", "light", "gradient", "none")
+    val NAMES = arrayOf("RGB", "Pink", "Dark", "Light", "Gradient", "None")
+
+    fun hueAt(deg: Float): Int {
+        val h = ((deg % 360f) + 360f) % 360f
+        return Color.HSVToColor(floatArrayOf(h, 0.85f, 1f))
+    }
+
+    fun rgbNow(offset: Float): Int =
+        hueAt((System.currentTimeMillis() / 20L % 360L).toFloat() + offset)
+
+    fun accentOf(mode: String): Int = when (mode) {
+        "rgb" -> rgbNow(0f)
+        "pink" -> Color.parseColor("#FF4081")
+        "light" -> Color.parseColor("#2979FF")
+        "gradient" -> Color.parseColor("#E040FB")
+        else -> Color.parseColor("#00E676")
+    }
+
+    fun preset(mode: String, key: String): Int {
+        val light = mode == "light"
+        val accent = accentOf(mode)
+        return when (key) {
+            Prefs.K_BG -> when (mode) {
+                "light" -> Color.parseColor("#F5F7FA")
+                "pink" -> Color.parseColor("#1A0A12")
+                "gradient" -> Color.parseColor("#120A1E")
+                "rgb" -> Color.parseColor("#05060D")
+                else -> Color.parseColor("#0B0F14")
+            }
+            Prefs.K_ACCENT -> accent
+            Prefs.K_TEXT, Prefs.K_ATEXT -> if (light) Color.parseColor("#111111") else Color.WHITE
+            Prefs.K_VBAR -> Color.parseColor("#99000000")
+            Prefs.K_VTEXT -> Color.WHITE
+            Prefs.K_ABAR -> (accent and 0x00FFFFFF) or 0x33000000
+            Prefs.K_ICON -> if (light) Color.parseColor("#111111") else Color.WHITE
+            else -> Color.WHITE
+        }
+    }
+}
+
 object Prefs {
     private fun p(c: Context) = c.getSharedPreferences("rajplayer_ultra", Context.MODE_PRIVATE)
 
-    fun bg(c: Context): Int = p(c).getInt("bg", Color.parseColor("#0B0F14"))
-    fun text(c: Context): Int = p(c).getInt("text", Color.WHITE)
-    fun accent(c: Context): Int = p(c).getInt("accent", Color.parseColor("#00E676"))
-    
-    // Separate Color Pickers
-    fun videoTitleBarColor(c: Context): Int = p(c).getInt("vid_title_bar_col", Color.parseColor("#99000000"))
-    fun videoTitleColor(c: Context): Int = p(c).getInt("vid_title_col", Color.WHITE)
-    fun audioTitleColor(c: Context): Int = p(c).getInt("aud_title_col", Color.WHITE)
-    fun audioTitleBarColor(c: Context): Int = p(c).getInt("aud_title_bar_col", Color.parseColor("#99000000"))
-    fun iconColor(c: Context): Int = p(c).getInt("icon_col", Color.WHITE)
+    // Colour keys (bg/text/accent purane keys hain, isliye manual rang jas ke tas rehte hain)
+    const val K_BG = "bg"
+    const val K_TEXT = "text"
+    const val K_ACCENT = "accent"
+    const val K_VBAR = "c_vbar"
+    const val K_VTEXT = "c_vtext"
+    const val K_ABAR = "c_abar"
+    const val K_ATEXT = "c_atext"
+    const val K_ICON = "c_icon"
+    val COLOR_KEYS = arrayOf(K_BG, K_TEXT, K_ACCENT, K_VBAR, K_VTEXT, K_ABAR, K_ATEXT, K_ICON)
 
-    fun setBg(c: Context, v: Int) { p(c).edit().putInt("bg", v).apply() }
-    fun setText(c: Context, v: Int) { p(c).edit().putInt("text", v).apply() }
-    fun setAccent(c: Context, v: Int) { p(c).edit().putInt("accent", v).apply() }
-    
-    fun setVideoTitleBarColor(c: Context, v: Int) { p(c).edit().putInt("vid_title_bar_col", v).apply() }
-    fun setVideoTitleColor(c: Context, v: Int) { p(c).edit().putInt("vid_title_col", v).apply() }
-    fun setAudioTitleColor(c: Context, v: Int) { p(c).edit().putInt("aud_title_col", v).apply() }
-    fun setAudioTitleBarColor(c: Context, v: Int) { p(c).edit().putInt("aud_title_bar_col", v).apply() }
-    fun setIconColor(c: Context, v: Int) { p(c).edit().putInt("icon_col", v).apply() }
+    // ---- theme mode ----
+    fun themeMode(c: Context): String = p(c).getString("theme_mode", "dark") ?: "dark"
 
+    fun setThemeMode(c: Context, mode: String, resetColors: Boolean) {
+        val e = p(c).edit()
+        e.putString("theme_mode", mode)
+        if (resetColors) for (k in COLOR_KEYS) e.remove(k)
+        e.apply()
+    }
+
+    // ---- colours ----
+    fun color(c: Context, key: String): Int {
+        val s = p(c)
+        return if (s.contains(key)) s.getInt(key, 0) else Theme.preset(themeMode(c), key)
+    }
+
+    fun hasOverride(c: Context, key: String): Boolean = p(c).contains(key)
+    fun setColor(c: Context, key: String, v: Int) { p(c).edit().putInt(key, v).apply() }
+    fun clearColor(c: Context, key: String) { p(c).edit().remove(key).apply() }
+
+    fun resetColors(c: Context) {
+        val e = p(c).edit()
+        for (k in COLOR_KEYS) e.remove(k)
+        e.apply()
+    }
+
+    fun bg(c: Context): Int = color(c, K_BG)
+    fun text(c: Context): Int = color(c, K_TEXT)
+    fun accent(c: Context): Int = color(c, K_ACCENT)
+    fun videoBarColor(c: Context): Int = color(c, K_VBAR)
+    fun videoTextColor(c: Context): Int = color(c, K_VTEXT)
+    fun audioBarColor(c: Context): Int = color(c, K_ABAR)
+    fun audioTextColor(c: Context): Int = color(c, K_ATEXT)
+    fun iconColor(c: Context): Int = color(c, K_ICON)
+
+    fun setBg(c: Context, v: Int) = setColor(c, K_BG, v)
+    fun setText(c: Context, v: Int) = setColor(c, K_TEXT, v)
+    fun setAccent(c: Context, v: Int) = setColor(c, K_ACCENT, v)
+
+    // ---- animation ----
+    fun atomicOn(c: Context): Boolean = p(c).getBoolean("atomic_on", true)
+    fun setAtomicOn(c: Context, v: Boolean) { p(c).edit().putBoolean("atomic_on", v).apply() }
+
+    fun atomSpeed(c: Context): Float = p(c).getFloat("atom_speed", 1f).coerceIn(0.5f, 2f)
+    fun setAtomSpeed(c: Context, v: Float) { p(c).edit().putFloat("atom_speed", v.coerceIn(0.5f, 2f)).apply() }
+
+    fun rgbBorder(c: Context): Boolean = p(c).getBoolean("rgb_border", false)
+    fun setRgbBorder(c: Context, v: Boolean) { p(c).edit().putBoolean("rgb_border", v).apply() }
+
+    // ---- wallpaper ----
     fun wall(c: Context): String? = p(c).getString("wall", null)
     fun setWall(c: Context, v: String?) { p(c).edit().putString("wall", v).apply() }
 
-    fun rgbAnim(c: Context): Boolean = p(c).getBoolean("rgb_anim", true)
-    fun setRgbAnim(c: Context, v: Boolean) { p(c).edit().putBoolean("rgb_anim", v).apply() }
-
-    fun atomicAnim(c: Context): Boolean = p(c).getBoolean("atomic_anim", true)
-    fun setAtomicAnim(c: Context, v: Boolean) { p(c).edit().putBoolean("atomic_anim", v).apply() }
-
-    fun themeMode(c: Context): String = p(c).getString("theme_mode", "rgb") ?: "rgb" // rgb, dark, light, pink, gradient, none
-    fun setThemeMode(c: Context, v: String) { p(c).edit().putString("theme_mode", v).apply() }
-
-    fun animSpeed(c: Context): Float = p(c).getFloat("anim_speed", 1.0f)
-    fun setAnimSpeed(c: Context, v: Float) { p(c).edit().putFloat("anim_speed", v).apply() }
-
+    // ---- playback state ----
     fun pos(c: Context, key: String): Long = p(c).getLong("pos_" + key, 0L)
     fun setPos(c: Context, key: String, v: Long) {
         val e = p(c).edit()
@@ -64,6 +136,7 @@ object Prefs {
     fun gridView(c: Context): Boolean = p(c).getBoolean("grid_view", false)
     fun setGridView(c: Context, v: Boolean) { p(c).edit().putBoolean("grid_view", v).apply() }
 
+    // Background audio ab default ON (naya key)
     fun bgAudio(c: Context): Boolean = p(c).getBoolean("bg_audio2", true)
     fun setBgAudio(c: Context, v: Boolean) { p(c).edit().putBoolean("bg_audio2", v).apply() }
 

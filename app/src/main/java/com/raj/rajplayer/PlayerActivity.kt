@@ -127,7 +127,7 @@ class PlayerActivity : Activity() {
         val t = TextView(this)
         t.text = sym
         t.textSize = size
-        t.setTextColor(Color.WHITE)
+        t.setTextColor(Prefs.iconColor(this))
         t.gravity = Gravity.CENTER
         t.setPadding(dp(12), dp(8), dp(12), dp(8))
         t.setOnClickListener { f(t) }
@@ -412,11 +412,11 @@ class PlayerActivity : Activity() {
 
         topBar = LinearLayout(this)
         topBar.gravity = Gravity.CENTER_VERTICAL
-        topBar.setBackgroundColor(0x99000000.toInt())
+        topBar.setBackgroundColor(Prefs.videoBarColor(this))
         topBar.setPadding(dp(20), dp(8), dp(20), dp(8))
         topBar.addView(ib("\u2190", 22f) { finish() })
         titleTv = TextView(this)
-        titleTv.setTextColor(Color.WHITE)
+        titleTv.setTextColor(Prefs.videoTextColor(this))
         titleTv.textSize = 15f
         titleTv.maxLines = 1
         titleTv.ellipsize = TextUtils.TruncateAt.END
