@@ -45,7 +45,7 @@ class MainActivity : Activity() {
 
     data class V(val name: String, val uri: Uri, val dur: Long, val size: Long, val folder: String, val date: Long)
     data class Item(val title: String, val sub: String, val uri: Uri?, val badge: String, val tag: String)
-    class H(val check: TextView, val thumb: ImageView, val badge: TextView, val title: TextView, val sub: TextView)
+    class H(val rowRoot: LinearLayout, val check: TextView, val thumb: ImageView, val badge: TextView, val title: TextView, val sub: TextView)
 
     private val MP = ViewGroup.LayoutParams.MATCH_PARENT
     private val WC = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -104,7 +104,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // ================= lifecycle =================
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         frame = FrameLayout(this)
@@ -173,7 +172,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // ================= share / open-with =================
     @Suppress("DEPRECATION")
     private fun handleIncoming(i: Intent?): Boolean {
         if (i == null) return false
@@ -197,9 +195,10 @@ class MainActivity : Activity() {
     }
 
     private fun openUri(u: Uri, mime: String?) {
+        Prefs.setLastPlayed(this, u.toString())
         val t = mime ?: contentResolver.getType(u) ?: ""
         val aud = t.startsWith("audio/") || (t.isEmpty() && looksAudio(u))
-        val cls: Class<*> = if (aud) AudioActivity::class.java else Hooks.videoClass(this, u)
+        val cls: Class<*> = if (aud) AudioActivity::class.java else PlayerActivity::class.java
         val i = Intent(this, cls)
         i.data = u
         i.clipData = ClipData.newRawUri("media", u)
@@ -207,7 +206,6 @@ class MainActivity : Activity() {
         startActivity(i)
     }
 
-    // ================= helpers =================
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun perm(): String =
@@ -240,7 +238,7 @@ class MainActivity : Activity() {
 
     private fun contrast(c: Int) = if (Color.luminance(c) > 0.5f) Color.BLACK else Color.WHITE
 
-    private fun isAudio(u: Uri) = u.toString().contains("/audio/")
+    private fun isAudio(u: Uri) = u.toString().contains("/audio/") || looksAudio(u)
 
     private fun label(t: String, size: Float, color: Int): TextView {
         val v = TextView(this)
@@ -301,11 +299,10 @@ class MainActivity : Activity() {
         }
     }
 
-    // Atomic animation: background me (content ke peeche), touch nahi pakadta
     private fun addAtomic() {
         atomic = null
         if (!Prefs.atomicOn(this) || Prefs.themeMode(this) == "none") return
-        val av = AtomicView(this)
+        val av = AtomicView(this, false)
         atomic = av
         frame.addView(av, FrameLayout.LayoutParams(MP, MP))
     }
@@ -336,7 +333,6 @@ class MainActivity : Activity() {
         return if (s.isEmpty()) "Internal Storage" else s
     }
 
-    // ================= media load (background thread) =================
     private fun loadMedia() {
         val vList = ArrayList<V>()
         val vBase = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
@@ -429,14 +425,14 @@ class MainActivity : Activity() {
         }
     }
 
-    // ================= play =================
     private fun playList(list: List<V>, index: Int) {
         if (index < 0 || index >= list.size) return
         val cur = list[index]
+        Prefs.setLastPlayed(this, cur.uri.toString())
         val aud = isAudio(cur.uri)
         val q = list.filter { isAudio(it.uri) == aud }
         val qi = q.indexOfFirst { it.uri == cur.uri }
-        val cls: Class<*> = if (aud) AudioActivity::class.java else Hooks.videoClass(this, cur.uri)
+        val cls: Class<*> = if (aud) AudioActivity::class.java else PlayerActivity::class.java
         val i = Intent(this, cls)
         i.data = cur.uri
         i.putStringArrayListExtra("list", ArrayList(q.map { it.uri.toString() }))
@@ -447,11 +443,11 @@ class MainActivity : Activity() {
     }
 
     private fun openNowPlaying() {
-        val cls: Class<*> =
-            if (Engine.isVideo) Hooks.videoClass(this, Engine.items.getOrNull(Engine.idx))
-            else AudioActivity::class.java
+        val curUri = Engine.items.getOrNull(Engine.idx)
+        if (curUri != null) Prefs.setLastPlayed(this, curUri.toString())
+        val cls: Class<*> = if (Engine.isVideo) PlayerActivity::class.java else AudioActivity::class.java
         val i = Intent(this, cls)
-        i.data = Engine.items.getOrNull(Engine.idx)
+        i.data = curUri
         i.putExtra("cont", true)
         i.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
         startActivity(i)
@@ -481,6 +477,7 @@ class MainActivity : Activity() {
             .setPositiveButton("Play") { _, _ ->
                 val u = et.text.toString().trim()
                 if (u.isNotEmpty()) {
+                    Prefs.setLastPlayed(this, u)
                     val i = Intent(this, PlayerActivity::class.java)
                     i.data = Uri.parse(u)
                     startActivity(i)
@@ -490,7 +487,6 @@ class MainActivity : Activity() {
             .show()
     }
 
-    // ================= select + delete =================
     private fun toggleSel(u: Uri?) {
         if (u == null) return
         val k = u.toString()
@@ -568,7 +564,7 @@ class MainActivity : Activity() {
     }
 
     private fun sortDialog() {
-        val items = arrayOf(
+        val items = arrayOf<CharSequence>(
             "Date: new to old", "Date: old to new",
             "Name: A to Z", "Name: Z to A",
             "Size: big to small", "Size: small to big",
@@ -585,11 +581,10 @@ class MainActivity : Activity() {
             .show()
     }
 
-    // ================= list rows =================
     private fun makeRow(): Pair<View, H> {
         val row = LinearLayout(this)
         row.gravity = Gravity.CENTER_VERTICAL
-        row.setPadding(dp(6), dp(6), dp(6), dp(6))
+        row.setPadding(dp(8), dp(6), dp(8), dp(6))
 
         val check = TextView(this)
         check.textSize = 22f
@@ -628,7 +623,7 @@ class MainActivity : Activity() {
         col.addView(title)
         col.addView(sub)
         row.addView(col, LinearLayout.LayoutParams(0, WC, 1f))
-        return Pair(row, H(check, thumb, badge, title, sub))
+        return Pair(row, H(row, check, thumb, badge, title, sub))
     }
 
     private fun makeAdapter(items: List<Item>, tc: Int, ac: Int): BaseAdapter = object : BaseAdapter() {
@@ -649,14 +644,33 @@ class MainActivity : Activity() {
             }
             val item = items[position]
             val isFolder = item.tag.startsWith("F:")
-            holder.title.text = item.title
-            holder.title.setTextColor(tc)
-            holder.sub.text = item.sub
-            holder.sub.setTextColor((tc and 0x00FFFFFF) or 0x99000000.toInt())
+            val u = item.uri
+            val lastUri = Prefs.lastPlayed(this@MainActivity)
+            val isLastPlayed = !isFolder && u != null && u.toString() == lastUri
+
+            if (isLastPlayed) {
+                holder.title.text = "\u25B6 " + item.title
+                holder.title.setTextColor(ac)
+                holder.title.setTypeface(null, Typeface.BOLD)
+                holder.sub.text = "LAST PLAYED \u2022 " + item.sub
+                holder.sub.setTextColor(ac)
+                val gd = GradientDrawable()
+                gd.setColor((ac and 0x00FFFFFF) or 0x26000000)
+                gd.setStroke(dp(1), ac)
+                gd.cornerRadius = dp(10).toFloat()
+                holder.rowRoot.background = gd
+            } else {
+                holder.title.text = item.title
+                holder.title.setTextColor(tc)
+                holder.title.setTypeface(null, Typeface.NORMAL)
+                holder.sub.text = item.sub
+                holder.sub.setTextColor((tc and 0x00FFFFFF) or 0x99000000.toInt())
+                holder.rowRoot.background = null
+            }
+
             holder.badge.text = item.badge
             holder.badge.visibility = if (item.badge.isEmpty()) View.GONE else View.VISIBLE
 
-            val u = item.uri
             holder.check.visibility = if (selectMode && !isFolder) View.VISIBLE else View.GONE
             holder.check.setTextColor(ac)
             holder.check.text = if (u != null && selected.contains(u.toString())) "\u2611" else "\u2610"
@@ -689,7 +703,6 @@ class MainActivity : Activity() {
         }
     }
 
-    // ================= mini player =================
     private fun refreshMini() {
         if (!::miniBar.isInitialized) return
         if (!Engine.active || inSettings) {
@@ -726,7 +739,6 @@ class MainActivity : Activity() {
         return bar
     }
 
-    // ================= Home =================
     private fun showHome() {
         inSettings = false
         val tc = Prefs.text(this)
@@ -966,7 +978,6 @@ class MainActivity : Activity() {
         listHolder.addView(col, FrameLayout.LayoutParams(MP, MP))
     }
 
-    // ================= Settings =================
     private fun refreshSettings() {
         settingsY = settingsSv?.scrollY ?: 0
         showSettings()
@@ -1058,13 +1069,13 @@ class MainActivity : Activity() {
         root.orientation = LinearLayout.VERTICAL
         root.setPadding(dp(16), dp(40), dp(16), dp(32))
 
-        root.addView(label("\u2699\uFE0F Settings", 24f, tc))
+        root.addView(label("\u2699\uFE0F Ultra Settings", 24f, tc))
         root.addView(button("\u2190 Back", ac) {
             settingsY = 0
             showHome()
         })
 
-        // ---- theme presets ----
+        // Theme Presets
         root.addView(label("Theme Presets", 16f, tc))
         val cur = Prefs.themeMode(this)
         val presetRow = HorizontalScrollView(this)
@@ -1079,23 +1090,27 @@ class MainActivity : Activity() {
         }
         presetRow.addView(pr)
         root.addView(presetRow)
-        root.addView(label("A preset sets every colour of that theme. 'None' keeps your manual colours and turns the animation off.", 12f, tc))
 
-        // ---- animation ----
-        root.addView(label("Animation", 16f, tc))
-        root.addView(button("Atomic Animation: " + (if (Prefs.atomicOn(this)) "ON" else "OFF"), ac) {
+        // Animation & Margin Controls (Up to 6.0x)
+        root.addView(label("Diamond Bonding Animation & Speed (0.5x - 6.0x)", 16f, tc))
+        root.addView(button("App Background Atomic Animation: " + (if (Prefs.atomicOn(this)) "ON" else "OFF"), ac) {
             Prefs.setAtomicOn(this, !Prefs.atomicOn(this))
             refreshSettings()
         })
-        root.addView(button("RGB Border: " + (if (Prefs.rgbBorder(this)) "ON" else "OFF"), ac) {
+        root.addView(button("Video Player Black Margin Animation: " + (if (Prefs.playerMarginAnim(this)) "ON" else "OFF"), ac) {
+            Prefs.setPlayerMarginAnim(this, !Prefs.playerMarginAnim(this))
+            refreshSettings()
+        })
+        root.addView(button("RGB Glowing Border: " + (if (Prefs.rgbBorder(this)) "ON" else "OFF"), ac) {
             Prefs.setRgbBorder(this, !Prefs.rgbBorder(this))
             refreshSettings()
         })
+
         val spTv = label("Animation Speed: " + String.format("%.1fx", Prefs.atomSpeed(this)), 14f, tc)
         root.addView(spTv)
         val spSb = SeekBar(this)
-        spSb.max = 30
-        spSb.progress = Math.round((Prefs.atomSpeed(this) - 0.5f) / 0.05f)
+        spSb.max = 110 // 0.5x + (110 * 0.05) = 6.0x
+        spSb.progress = Math.round((Prefs.atomSpeed(this) - 0.5f) / 0.05f).coerceIn(0, 110)
         spSb.progressTintList = ColorStateList.valueOf(ac)
         spSb.thumbTintList = ColorStateList.valueOf(ac)
         spSb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
@@ -1113,7 +1128,17 @@ class MainActivity : Activity() {
         })
         root.addView(spSb)
 
-        // ---- playback ----
+        // Quick Speed Presets
+        val qRow = LinearLayout(this)
+        for (sp in floatArrayOf(1f, 2f, 4f, 6f)) {
+            qRow.addView(button(String.format("%.0fx", sp), ac) {
+                Prefs.setAtomSpeed(this, sp)
+                refreshSettings()
+            }, LinearLayout.LayoutParams(0, WC, 1f))
+        }
+        root.addView(qRow)
+
+        // Playback
         root.addView(label("Playback", 16f, tc))
         root.addView(button("Background Audio: " + (if (Prefs.bgAudio(this)) "ON" else "OFF"), ac) {
             Prefs.setBgAudio(this, !Prefs.bgAudio(this))
@@ -1124,7 +1149,7 @@ class MainActivity : Activity() {
             Power.request(this)
         })
         val seekSecs = intArrayOf(5, 10, 15, 20, 30)
-        val seekNames = arrayOf("5 seconds", "10 seconds", "15 seconds", "20 seconds", "30 seconds")
+        val seekNames = arrayOf<CharSequence>("5 seconds", "10 seconds", "15 seconds", "20 seconds", "30 seconds")
         root.addView(button("Double-tap Seek: " + Prefs.seekSec(this) + "s", ac) {
             AlertDialog.Builder(this)
                 .setTitle("Seek duration")
@@ -1135,22 +1160,22 @@ class MainActivity : Activity() {
                 .show()
         })
 
-        // ---- colours ----
-        root.addView(label("Colours (palette or custom hex)", 16f, tc))
-        colorPicker(root, "Background", Prefs.K_BG)
-        colorPicker(root, "Accent", Prefs.K_ACCENT)
-        colorPicker(root, "General Text", Prefs.K_TEXT)
-        colorPicker(root, "Video Title Bar", Prefs.K_VBAR)
-        colorPicker(root, "Video Title Text", Prefs.K_VTEXT)
-        colorPicker(root, "Audio Title Bar", Prefs.K_ABAR)
-        colorPicker(root, "Audio Title Text", Prefs.K_ATEXT)
+        // Granular Color Pickers
+        root.addView(label("Granular Colours (Palette or Custom Hex)", 16f, tc))
+        colorPicker(root, "Background Colour", Prefs.K_BG)
+        colorPicker(root, "Accent Colour", Prefs.K_ACCENT)
+        colorPicker(root, "General Text Colour", Prefs.K_TEXT)
+        colorPicker(root, "Video Title Bar Colour", Prefs.K_VBAR)
+        colorPicker(root, "Video Title Text Colour", Prefs.K_VTEXT)
+        colorPicker(root, "Audio Title Bar Colour", Prefs.K_ABAR)
+        colorPicker(root, "Audio Title Text Colour", Prefs.K_ATEXT)
         colorPicker(root, "General Icon Colour", Prefs.K_ICON)
         root.addView(button("Reset all colours to theme", ac) {
             Prefs.resetColors(this)
             refreshSettings()
         })
 
-        // ---- wallpaper ----
+        // Wallpaper
         root.addView(label("Wallpaper", 16f, tc))
         root.addView(button("Choose Wallpaper", ac) { pickWall() })
         root.addView(button("Remove Wallpaper", ac) {

@@ -8,6 +8,7 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.SweepGradient
+import android.os.Build
 import android.view.Choreographer
 import android.view.View
 import java.lang.ref.WeakReference
@@ -15,10 +16,7 @@ import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
 
-// "Diamond bonding" atomic animation. Sirf background me chalta hai:
-//  - touch kabhi nahi pakadta
-//  - excludeView()/excludeRect() wale hisse (jaise video area) me kuch nahi banata
-class AtomicView(ctx: Context) : View(ctx) {
+class AtomicView(ctx: Context, private val isVideoMarginMode: Boolean = false) : View(ctx) {
 
     private class Node(val bx: Float, val by: Float, val p1: Float, val p2: Float, val sp: Float) {
         var x = bx
@@ -51,39 +49,39 @@ class AtomicView(ctx: Context) : View(ctx) {
     private val cG1 = Color.parseColor("#E040FB")
     private val cG2 = Color.parseColor("#00E5FF")
 
-    // text/list ke peeche halka rakhne ke liye (0..255)
-    var maxAlpha = 120
+    var maxAlpha = 140
 
     init {
         isClickable = false
         isFocusable = false
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         bondPaint.style = Paint.Style.STROKE
-        bondPaint.strokeWidth = 1.3f * d
+        bondPaint.strokeWidth = 1.4f * d
         bondPaint.strokeCap = Paint.Cap.ROUND
         nodePaint.style = Paint.Style.FILL
         applyPrefs()
     }
 
-    // ---- public API ----
     fun applyPrefs() {
         mode = Prefs.themeMode(context)
         speed = Prefs.atomSpeed(context)
-        active = Prefs.atomicOn(context) && mode != "none"
+        active = if (isVideoMarginMode) {
+            Prefs.playerMarginAnim(context) && mode != "none"
+        } else {
+            Prefs.atomicOn(context) && mode != "none"
+        }
         visibility = if (active) VISIBLE else GONE
         syncLoop()
+        invalidate()
     }
 
     fun setThemeMode(m: String) {
         mode = m
-        active = Prefs.atomicOn(context) && m != "none"
-        visibility = if (active) VISIBLE else GONE
-        syncLoop()
+        applyPrefs()
     }
 
-    // 0.5x .. 2.0x
     fun setSpeedMultiplier(m: Float) {
-        speed = m.coerceIn(0.5f, 2f)
+        speed = m.coerceIn(0.5f, 6f)
     }
 
     fun excludeView(v: View) {
@@ -99,7 +97,6 @@ class AtomicView(ctx: Context) : View(ctx) {
         rects.clear()
     }
 
-    // ---- layout ----
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         super.onSizeChanged(w, h, ow, oh)
         build(w, h)
@@ -108,7 +105,7 @@ class AtomicView(ctx: Context) : View(ctx) {
     private fun build(w: Int, h: Int) {
         nodes.clear()
         if (w <= 0 || h <= 0) return
-        spacing = 60f * d
+        spacing = 58f * d
         val cols = (w / spacing).toInt() + 2
         val rows = (h / spacing).toInt() + 2
         val rnd = java.util.Random(7)
@@ -125,7 +122,7 @@ class AtomicView(ctx: Context) : View(ctx) {
                 }
             }
         }
-        val lim = spacing * 1.5f
+        val lim = spacing * 1.55f
         val pairs = ArrayList<Int>()
         for (a in 0 until nodes.size) {
             for (b in (a + 1) until nodes.size) {
@@ -140,13 +137,12 @@ class AtomicView(ctx: Context) : View(ctx) {
         bonds = pairs.toIntArray()
     }
 
-    // ---- frame loop (~30 fps) ----
     private val frameCb = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
             if (!running) return
             if (last == 0L) last = frameTimeNanos
             val dt = (frameTimeNanos - last) / 1_000_000_000f
-            if (dt >= 0.032f) {
+            if (dt >= 0.030f) {
                 last = frameTimeNanos
                 time += dt.coerceAtMost(0.1f) * speed
                 move()
@@ -184,14 +180,13 @@ class AtomicView(ctx: Context) : View(ctx) {
     }
 
     private fun move() {
-        val r = spacing * 0.2f
+        val r = spacing * 0.24f
         for (n in nodes) {
             n.x = n.bx + cos(time * n.sp + n.p1) * r
-            n.y = n.by + sin(time * n.sp * 0.8f + n.p2) * r
+            n.y = n.by + sin(time * n.sp * 0.85f + n.p2) * r
         }
     }
 
-    // ---- colours ----
     private fun hue(deg: Float): Int {
         hsv[0] = ((deg % 360f) + 360f) % 360f
         return Color.HSVToColor(hsv)
@@ -217,7 +212,15 @@ class AtomicView(ctx: Context) : View(ctx) {
 
     private fun withAlpha(c: Int, a: Int): Int = (a.coerceIn(0, 255) shl 24) or (c and 0x00FFFFFF)
 
-    // ---- draw ----
+    @Suppress("DEPRECATION")
+    private fun clipOutCompat(canvas: Canvas, rect: Rect) {
+        if (Build.VERSION.SDK_INT >= 26) {
+            canvas.clipOutRect(rect)
+        } else {
+            canvas.clipRect(rect, android.graphics.Region.Op.DIFFERENCE)
+        }
+    }
+
     private fun clipExclusions(canvas: Canvas) {
         if (excluded.isEmpty() && rects.isEmpty()) return
         getLocationInWindow(loc)
@@ -228,14 +231,14 @@ class AtomicView(ctx: Context) : View(ctx) {
                 iter.remove()
                 continue
             }
-            if (!v.isShown) continue
+            if (!v.isShown || v.width <= 0 || v.height <= 0) continue
             v.getLocationInWindow(loc2)
             val l = loc2[0] - loc[0]
             val t = loc2[1] - loc[1]
             tmp.set(l, t, l + v.width, t + v.height)
-            canvas.clipOutRect(tmp)
+            clipOutCompat(canvas, tmp)
         }
-        for (r in rects) canvas.clipOutRect(r)
+        for (r in rects) clipOutCompat(canvas, r)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -260,16 +263,15 @@ class AtomicView(ctx: Context) : View(ctx) {
         val pulse = 0.5f + 0.5f * sin(time * 2f)
         for (n in nodes) {
             val c = colorAt(n.x)
-            nodePaint.color = withAlpha(c, (maxAlpha * 0.35f).toInt())
+            nodePaint.color = withAlpha(c, (maxAlpha * 0.38f).toInt())
             canvas.drawCircle(n.x, n.y, (5f + 2f * pulse) * d, nodePaint)
-            nodePaint.color = withAlpha(c, (maxAlpha * 1.4f).toInt())
-            canvas.drawCircle(n.x, n.y, 2.2f * d, nodePaint)
+            nodePaint.color = withAlpha(c, (maxAlpha * 1.45f).toInt())
+            canvas.drawCircle(n.x, n.y, 2.3f * d, nodePaint)
         }
         canvas.restoreToCount(save)
     }
 }
 
-// Ghoomta hua RGB border (screen ke kinaare). Touch nahi pakadta.
 class RgbBorderView(ctx: Context) : View(ctx) {
 
     private val d = ctx.resources.displayMetrics.density
@@ -306,7 +308,7 @@ class RgbBorderView(ctx: Context) : View(ctx) {
             if (last == 0L) last = frameTimeNanos
             val dt = (frameTimeNanos - last) / 1_000_000_000f
             last = frameTimeNanos
-            angle = (angle + dt.coerceAtMost(0.1f) * 90f) % 360f
+            angle = (angle + dt.coerceAtMost(0.1f) * 90f * Prefs.atomSpeed(context)) % 360f
             invalidate()
             Choreographer.getInstance().postFrameCallback(this)
         }

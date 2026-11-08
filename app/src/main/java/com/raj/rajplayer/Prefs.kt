@@ -95,22 +95,24 @@ object Prefs {
     fun setText(c: Context, v: Int) = setColor(c, K_TEXT, v)
     fun setAccent(c: Context, v: Int) = setColor(c, K_ACCENT, v)
 
+    // Global Atomic Animation
     fun atomicOn(c: Context): Boolean = p(c).getBoolean("atomic_on", true)
     fun setAtomicOn(c: Context, v: Boolean) { p(c).edit().putBoolean("atomic_on", v).apply() }
 
-    // Video player margin atomic animation toggle specifically
+    // Independent Video Player Black Margin Animation Toggle
     fun playerMarginAnim(c: Context): Boolean = p(c).getBoolean("player_margin_anim", true)
     fun setPlayerMarginAnim(c: Context, v: Boolean) { p(c).edit().putBoolean("player_margin_anim", v).apply() }
 
-    // Speed up to 6.0x
+    // Animation Speed: 0.5x up to 6.0x
     fun atomSpeed(c: Context): Float = p(c).getFloat("atom_speed", 1f).coerceIn(0.5f, 6f)
     fun setAtomSpeed(c: Context, v: Float) { p(c).edit().putFloat("atom_speed", v.coerceIn(0.5f, 6f)).apply() }
 
     fun rgbBorder(c: Context): Boolean = p(c).getBoolean("rgb_border", false)
     fun setRgbBorder(c: Context, v: Boolean) { p(c).edit().putBoolean("rgb_border", v).apply() }
 
-    fun lastPlayedUri(c: Context): String? = p(c).getString("last_played_uri", null)
-    fun setLastPlayedUri(c: Context, uri: String?) { p(c).edit().putString("last_played_uri", uri).apply() }
+    // Last Played Media URI Highlight Tracking
+    fun lastPlayed(c: Context): String = p(c).getString("last_played_uri", "") ?: ""
+    fun setLastPlayed(c: Context, uriStr: String) { p(c).edit().putString("last_played_uri", uriStr).apply() }
 
     fun wall(c: Context): String? = p(c).getString("wall", null)
     fun setWall(c: Context, v: String?) { p(c).edit().putString("wall", v).apply() }
