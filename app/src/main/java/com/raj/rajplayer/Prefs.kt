@@ -9,8 +9,7 @@ object Prefs {
     fun bg(c: Context): Int = p(c).getInt("bg", Color.parseColor("#0B0F14"))
     fun text(c: Context): Int = p(c).getInt("text", Color.WHITE)
     fun accent(c: Context): Int = p(c).getInt("accent", Color.parseColor("#00E676"))
-    
-    // Separate Text & Bar Color Pickers
+
     fun videoTitleBarColor(c: Context): Int = p(c).getInt("vid_title_bar_col", Color.parseColor("#99000000"))
     fun videoTitleColor(c: Context): Int = p(c).getInt("vid_title_col", Color.WHITE)
     fun audioTitleColor(c: Context): Int = p(c).getInt("aud_title_col", Color.WHITE)
@@ -20,7 +19,7 @@ object Prefs {
     fun setBg(c: Context, v: Int) { p(c).edit().putInt("bg", v).apply() }
     fun setText(c: Context, v: Int) { p(c).edit().putInt("text", v).apply() }
     fun setAccent(c: Context, v: Int) { p(c).edit().putInt("accent", v).apply() }
-    
+
     fun setVideoTitleBarColor(c: Context, v: Int) { p(c).edit().putInt("vid_title_bar_col", v).apply() }
     fun setVideoTitleColor(c: Context, v: Int) { p(c).edit().putInt("vid_title_col", v).apply() }
     fun setAudioTitleColor(c: Context, v: Int) { p(c).edit().putInt("aud_title_col", v).apply() }
@@ -36,7 +35,7 @@ object Prefs {
     fun atomicAnim(c: Context): Boolean = p(c).getBoolean("atomic_anim", true)
     fun setAtomicAnim(c: Context, v: Boolean) { p(c).edit().putBoolean("atomic_anim", v).apply() }
 
-    fun themeMode(c: Context): String = p(c).getString("theme_mode", "rgb") ?: "rgb" // rgb, dark, light, pink, gradient, none
+    fun themeMode(c: Context): String = p(c).getString("theme_mode", "rgb") ?: "rgb"
     fun setThemeMode(c: Context, v: String) { p(c).edit().putString("theme_mode", v).apply() }
 
     fun animSpeed(c: Context): Float = p(c).getFloat("anim_speed", 1.0f)
