@@ -164,4 +164,16 @@ object Prefs {
     }
 
     fun isFav(c: Context, uriStr: String): Boolean = favs(c).contains(uriStr)
+
+    fun bms(c: Context, key: String): List<Long> {
+        val s = p(c).getString("bm_" + key, "") ?: ""
+        if (s.isEmpty()) return emptyList()
+        return s.split(",").mapNotNull { it.toLongOrNull() }
+    }
+
+    fun setBms(c: Context, key: String, v: List<Long>) {
+        val e = p(c).edit()
+        if (v.isEmpty()) e.remove("bm_" + key) else e.putString("bm_" + key, v.joinToString(","))
+        e.apply()
+    }
 }
