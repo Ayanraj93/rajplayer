@@ -56,24 +56,19 @@ class PlaybackService : Service() {
             override fun onPlay() {
                 if (!Engine.isPlaying()) Engine.toggle(this@PlaybackService)
             }
-
             override fun onPause() {
                 if (Engine.isPlaying()) Engine.toggle(this@PlaybackService)
             }
-
             override fun onSkipToNext() {
                 Engine.next(this@PlaybackService)
             }
-
             override fun onSkipToPrevious() {
                 Engine.prev(this@PlaybackService)
             }
-
             override fun onSeekTo(pos: Long) {
                 Engine.seekTo(pos)
                 refresh()
             }
-
             override fun onStop() {
                 closeAll()
             }
@@ -106,6 +101,7 @@ class PlaybackService : Service() {
 
     fun refresh() {
         updateSession()
+        Power.wake(this, Engine.active && Engine.isPlaying())
         Bg.wake(this, Engine.active && Engine.isPlaying())
         try {
             if (Build.VERSION.SDK_INT >= 34) {
@@ -194,6 +190,7 @@ class PlaybackService : Service() {
     override fun onDestroy() {
         super.onDestroy()
         if (instance === this) instance = null
+        Power.wake(this, false)
         Bg.wake(this, false)
         try {
             session?.release()

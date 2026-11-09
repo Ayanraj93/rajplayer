@@ -68,7 +68,7 @@ class PlayerActivity : Activity() {
     private var volCur = 0.5f
     private var videoScaleFactor = 1.0f
 
-    private val speeds = floatArrayOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 2.5f, 3.0f)
+    private val speeds = floatArrayOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f, 2.0f, 2.5f, 3.0f, 4.0f, 6.0f)
     private var speedIdx = 2
     private val scales = listOf(
         MediaPlayer.ScaleType.SURFACE_BEST_FIT,
@@ -127,7 +127,7 @@ class PlayerActivity : Activity() {
         val t = TextView(this)
         t.text = sym
         t.textSize = size
-        t.setTextColor(Color.WHITE)
+        t.setTextColor(Prefs.iconColor(this))
         t.gravity = Gravity.CENTER
         t.setPadding(dp(12), dp(8), dp(12), dp(8))
         t.setOnClickListener { f(t) }
@@ -175,31 +175,6 @@ class PlayerActivity : Activity() {
     }
 
     private fun controlsVisible() = lockBtn.visibility == View.VISIBLE
-
-    private fun applyOrientation(uri: Uri) {
-        var o = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-        videoPortrait = false
-        try {
-            if (uri.scheme == "content" || uri.scheme == "file") {
-                val r = MediaMetadataRetriever()
-                r.setDataSource(this, uri)
-                val w = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_WIDTH)?.toIntOrNull() ?: 0
-                val hh = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_HEIGHT)?.toIntOrNull() ?: 0
-                val rot = r.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION)?.toIntOrNull() ?: 0
-                r.release()
-                val dw = if (rot == 90 || rot == 270) hh else w
-                val dh = if (rot == 90 || rot == 270) w else hh
-                if (dw == 0 && dh == 0) {
-                    o = ActivityInfo.SCREEN_ORIENTATION_FULL_SENSOR
-                } else if (dh > dw) {
-                    o = ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-                    videoPortrait = true
-                }
-            }
-        } catch (e: Exception) {
-        }
-        requestedOrientation = o
-    }
 
     private fun onItem() {
         if (!Engine.active) {
@@ -389,6 +364,7 @@ class PlayerActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        intent?.data?.let { Prefs.setLastPlayed(this, it.toString()) }
         Cutout.enable(this)
         val cont = intent.getBooleanExtra("cont", false) && Engine.active && Engine.isVideo
         var uris: List<Uri> = emptyList()
@@ -437,11 +413,11 @@ class PlayerActivity : Activity() {
 
         topBar = LinearLayout(this)
         topBar.gravity = Gravity.CENTER_VERTICAL
-        topBar.setBackgroundColor(0x99000000.toInt())
+        topBar.setBackgroundColor(Prefs.videoBarColor(this))
         topBar.setPadding(dp(20), dp(8), dp(20), dp(8))
         topBar.addView(ib("\u2190", 22f) { finish() })
         titleTv = TextView(this)
-        titleTv.setTextColor(Color.WHITE)
+        titleTv.setTextColor(Prefs.videoTextColor(this))
         titleTv.textSize = 15f
         titleTv.maxLines = 1
         titleTv.ellipsize = TextUtils.TruncateAt.END
@@ -477,12 +453,10 @@ class PlayerActivity : Activity() {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
                 if (fromUser) curTv.text = fmt(p.toLong())
             }
-
             override fun onStartTrackingTouch(s: SeekBar?) {
                 userSeeking = true
                 ui.removeCallbacks(hideRun)
             }
-
             override fun onStopTrackingTouch(s: SeekBar?) {
                 mp.setTime((s?.progress ?: 0).toLong())
                 userSeeking = false
@@ -613,12 +587,10 @@ class PlayerActivity : Activity() {
 
         val gd = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
             override fun onDown(e: MotionEvent): Boolean = true
-
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
                 if (controlsVisible()) hideControls() else showControls()
                 return true
             }
-
             override fun onDoubleTap(e: MotionEvent): Boolean {
                 if (locked) return true
                 val w = touchView.width
@@ -628,7 +600,6 @@ class PlayerActivity : Activity() {
                 else togglePlay()
                 return true
             }
-
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
                 if (locked || e1 == null) return false
                 val w = touchView.width.toFloat()
@@ -694,7 +665,10 @@ class PlayerActivity : Activity() {
     override fun onStop() {
         super.onStop()
         if (!Engine.bgAudio && Engine.isPlaying()) Engine.pause()
-        if (Engine.bgAudio && Engine.isPlaying()) Bg.toAudioOnly()
+        if (Engine.bgAudio && Engine.isPlaying()) {
+            Bg.toAudioOnly()
+            PlaybackService.start(this)
+        }
     }
 
     override fun onDestroy() {
@@ -708,9 +682,7 @@ class PlayerActivity : Activity() {
             }
         } catch (e: Exception) {
         }
-        if (!Engine.bgAudio && Engine.listener == null) {
-            Engine.stopAll(this)
-        } else if (Engine.active && Engine.isPlaying()) {
+        if (Engine.active && Engine.isPlaying()) {
             PlaybackService.start(this)
         }
     }

@@ -45,7 +45,7 @@ class MainActivity : Activity() {
 
     data class V(val name: String, val uri: Uri, val dur: Long, val size: Long, val folder: String, val date: Long)
     data class Item(val title: String, val sub: String, val uri: Uri?, val badge: String, val tag: String)
-    class H(val rowRoot: LinearLayout, val check: TextView, val thumb: ImageView, val badge: TextView, val title: TextView, val sub: TextView)
+    class H(val check: TextView, val thumb: ImageView, val badge: TextView, val title: TextView, val sub: TextView)
 
     private val MP = ViewGroup.LayoutParams.MATCH_PARENT
     private val WC = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -104,6 +104,7 @@ class MainActivity : Activity() {
         }
     }
 
+    // ================= lifecycle =================
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         frame = FrameLayout(this)
@@ -172,6 +173,7 @@ class MainActivity : Activity() {
         }
     }
 
+    // ================= share / open-with =================
     @Suppress("DEPRECATION")
     private fun handleIncoming(i: Intent?): Boolean {
         if (i == null) return false
@@ -195,10 +197,9 @@ class MainActivity : Activity() {
     }
 
     private fun openUri(u: Uri, mime: String?) {
-        Prefs.setLastPlayed(this, u.toString())
         val t = mime ?: contentResolver.getType(u) ?: ""
         val aud = t.startsWith("audio/") || (t.isEmpty() && looksAudio(u))
-        val cls: Class<*> = if (aud) AudioActivity::class.java else PlayerActivity::class.java
+        val cls: Class<*> = if (aud) AudioActivity::class.java else Orient.videoClass(this, u)
         val i = Intent(this, cls)
         i.data = u
         i.clipData = ClipData.newRawUri("media", u)
@@ -206,6 +207,7 @@ class MainActivity : Activity() {
         startActivity(i)
     }
 
+    // ================= helpers =================
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
 
     private fun perm(): String =
@@ -235,10 +237,8 @@ class MainActivity : Activity() {
     }
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
-
     private fun contrast(c: Int) = if (Color.luminance(c) > 0.5f) Color.BLACK else Color.WHITE
-
-    private fun isAudio(u: Uri) = u.toString().contains("/audio/") || looksAudio(u)
+    private fun isAudio(u: Uri) = u.toString().contains("/audio/")
 
     private fun label(t: String, size: Float, color: Int): TextView {
         val v = TextView(this)
@@ -302,7 +302,7 @@ class MainActivity : Activity() {
     private fun addAtomic() {
         atomic = null
         if (!Prefs.atomicOn(this) || Prefs.themeMode(this) == "none") return
-        val av = AtomicView(this, false)
+        val av = AtomicView(this)
         atomic = av
         frame.addView(av, FrameLayout.LayoutParams(MP, MP))
     }
@@ -333,78 +333,42 @@ class MainActivity : Activity() {
         return if (s.isEmpty()) "Internal Storage" else s
     }
 
-    private fun loadMedia() {
-        val vList = ArrayList<V>()
-        val vBase = MediaStore.Video.Media.EXTERNAL_CONTENT_URI
-        val vProj = arrayOf(
-            MediaStore.Video.Media._ID,
-            MediaStore.Video.Media.DISPLAY_NAME,
-            MediaStore.Video.Media.DURATION,
-            MediaStore.Video.Media.SIZE,
-            MediaStore.MediaColumns.RELATIVE_PATH,
-            MediaStore.Video.Media.DATE_ADDED
-        )
-        try {
-            contentResolver.query(vBase, vProj, null, null, null)?.use { c ->
-                val idc = c.getColumnIndexOrThrow(MediaStore.Video.Media._ID)
-                val nc = c.getColumnIndexOrThrow(MediaStore.Video.Media.DISPLAY_NAME)
-                val dc = c.getColumnIndexOrThrow(MediaStore.Video.Media.DURATION)
-                val sc = c.getColumnIndexOrThrow(MediaStore.Video.Media.SIZE)
-                val rc = c.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
-                val dac = c.getColumnIndexOrThrow(MediaStore.Video.Media.DATE_ADDED)
-                while (c.moveToNext()) {
-                    vList.add(
-                        V(
-                            c.getString(nc) ?: "video",
-                            ContentUris.withAppendedId(vBase, c.getLong(idc)),
-                            c.getLong(dc), c.getLong(sc), c.getString(rc) ?: "",
-                            c.getLong(dac)
-                        )
-                    )
-                }
-            }
-        } catch (e: Exception) {
-        }
-        videos = sortList(vList)
+    private fun itemOf(v: V, badge: String) =
+        Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), badge)
 
-        val aList = ArrayList<V>()
-        val aBase = MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-        val aProj = arrayOf(
-            MediaStore.Audio.Media._ID,
-            MediaStore.Audio.Media.DISPLAY_NAME,
-            MediaStore.Audio.Media.DURATION,
-            MediaStore.Audio.Media.SIZE,
+    // ================= media load (background thread) =================
+    private fun queryMedia(video: Boolean): List<V> {
+        val base = if (video) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        val proj = arrayOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.DURATION,
+            MediaStore.MediaColumns.SIZE,
             MediaStore.MediaColumns.RELATIVE_PATH,
-            MediaStore.Audio.Media.DATE_ADDED
+            MediaStore.MediaColumns.DATE_ADDED
         )
+        val sel = if (video) null else MediaStore.Audio.Media.IS_MUSIC + " != 0"
+        val out = ArrayList<V>()
         try {
-            contentResolver.query(aBase, aProj, MediaStore.Audio.Media.IS_MUSIC + " != 0", null, null)?.use { c ->
-                val idc = c.getColumnIndexOrThrow(MediaStore.Audio.Media._ID)
-                val nc = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DISPLAY_NAME)
-                val dc = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DURATION)
-                val sc = c.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
-                val rc = c.getColumnIndexOrThrow(MediaStore.MediaColumns.RELATIVE_PATH)
-                val dac = c.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_ADDED)
+            contentResolver.query(base, proj, sel, null, null)?.use { c ->
                 while (c.moveToNext()) {
-                    aList.add(
+                    out.add(
                         V(
-                            c.getString(nc) ?: "audio",
-                            ContentUris.withAppendedId(aBase, c.getLong(idc)),
-                            c.getLong(dc), c.getLong(sc), c.getString(rc) ?: "",
-                            c.getLong(dac)
+                            c.getString(1) ?: "media",
+                            ContentUris.withAppendedId(base, c.getLong(0)),
+                            c.getLong(2), c.getLong(3), c.getString(4) ?: "", c.getLong(5)
                         )
                     )
                 }
             }
         } catch (e: Exception) {
         }
-        audios = sortList(aList)
+        return sortList(out)
     }
 
     private fun sortList(l: List<V>): List<V> {
-        val mode = Prefs.sortMode(this)
         val asc = Prefs.sortAsc(this)
-        val sorted = when (mode) {
+        val sorted = when (Prefs.sortMode(this)) {
             1 -> l.sortedBy { it.name.lowercase() }
             2 -> l.sortedBy { it.size }
             3 -> l.sortedBy { it.dur }
@@ -417,7 +381,8 @@ class MainActivity : Activity() {
         if (!hasPerm()) return
         loading = true
         loader.execute {
-            loadMedia()
+            videos = queryMedia(true)
+            audios = queryMedia(false)
             loading = false
             runOnUiThread {
                 if (!isFinishing && !inSettings && ::listHolder.isInitialized) renderList()
@@ -425,14 +390,14 @@ class MainActivity : Activity() {
         }
     }
 
+    // ================= play =================
     private fun playList(list: List<V>, index: Int) {
         if (index < 0 || index >= list.size) return
         val cur = list[index]
-        Prefs.setLastPlayed(this, cur.uri.toString())
         val aud = isAudio(cur.uri)
         val q = list.filter { isAudio(it.uri) == aud }
         val qi = q.indexOfFirst { it.uri == cur.uri }
-        val cls: Class<*> = if (aud) AudioActivity::class.java else PlayerActivity::class.java
+        val cls: Class<*> = if (aud) AudioActivity::class.java else Orient.videoClass(this, cur.uri)
         val i = Intent(this, cls)
         i.data = cur.uri
         i.putStringArrayListExtra("list", ArrayList(q.map { it.uri.toString() }))
@@ -443,11 +408,11 @@ class MainActivity : Activity() {
     }
 
     private fun openNowPlaying() {
-        val curUri = Engine.items.getOrNull(Engine.idx)
-        if (curUri != null) Prefs.setLastPlayed(this, curUri.toString())
-        val cls: Class<*> = if (Engine.isVideo) PlayerActivity::class.java else AudioActivity::class.java
+        val cls: Class<*> =
+            if (Engine.isVideo) Orient.videoClass(this, Engine.items.getOrNull(Engine.idx))
+            else AudioActivity::class.java
         val i = Intent(this, cls)
-        i.data = curUri
+        i.data = Engine.items.getOrNull(Engine.idx)
         i.putExtra("cont", true)
         i.addFlags(Intent.FLAG_ACTIVITY_REORDER_TO_FRONT)
         startActivity(i)
@@ -477,7 +442,6 @@ class MainActivity : Activity() {
             .setPositiveButton("Play") { _, _ ->
                 val u = et.text.toString().trim()
                 if (u.isNotEmpty()) {
-                    Prefs.setLastPlayed(this, u)
                     val i = Intent(this, PlayerActivity::class.java)
                     i.data = Uri.parse(u)
                     startActivity(i)
@@ -487,6 +451,7 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // ================= select + delete =================
     private fun toggleSel(u: Uri?) {
         if (u == null) return
         val k = u.toString()
@@ -564,7 +529,7 @@ class MainActivity : Activity() {
     }
 
     private fun sortDialog() {
-        val items = arrayOf<CharSequence>(
+        val items = arrayOf(
             "Date: new to old", "Date: old to new",
             "Name: A to Z", "Name: Z to A",
             "Size: big to small", "Size: small to big",
@@ -581,10 +546,11 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // ================= list rows =================
     private fun makeRow(): Pair<View, H> {
         val row = LinearLayout(this)
         row.gravity = Gravity.CENTER_VERTICAL
-        row.setPadding(dp(8), dp(6), dp(8), dp(6))
+        row.setPadding(dp(6), dp(6), dp(6), dp(6))
 
         val check = TextView(this)
         check.textSize = 22f
@@ -623,7 +589,7 @@ class MainActivity : Activity() {
         col.addView(title)
         col.addView(sub)
         row.addView(col, LinearLayout.LayoutParams(0, WC, 1f))
-        return Pair(row, H(row, check, thumb, badge, title, sub))
+        return Pair(row, H(check, thumb, badge, title, sub))
     }
 
     private fun makeAdapter(items: List<Item>, tc: Int, ac: Int): BaseAdapter = object : BaseAdapter() {
@@ -645,29 +611,13 @@ class MainActivity : Activity() {
             val item = items[position]
             val isFolder = item.tag.startsWith("F:")
             val u = item.uri
-            val lastUri = Prefs.lastPlayed(this@MainActivity)
-            val isLastPlayed = !isFolder && u != null && u.toString() == lastUri
-
-            if (isLastPlayed) {
-                holder.title.text = "\u25B6 " + item.title
-                holder.title.setTextColor(ac)
-                holder.title.setTypeface(null, Typeface.BOLD)
-                holder.sub.text = "LAST PLAYED \u2022 " + item.sub
-                holder.sub.setTextColor(ac)
-                val gd = GradientDrawable()
-                gd.setColor((ac and 0x00FFFFFF) or 0x26000000)
-                gd.setStroke(dp(1), ac)
-                gd.cornerRadius = dp(10).toFloat()
-                holder.rowRoot.background = gd
-            } else {
-                holder.title.text = item.title
-                holder.title.setTextColor(tc)
-                holder.title.setTypeface(null, Typeface.NORMAL)
-                holder.sub.text = item.sub
-                holder.sub.setTextColor((tc and 0x00FFFFFF) or 0x99000000.toInt())
-                holder.rowRoot.background = null
-            }
-
+            // last chala hua item highlight
+            val isLast = !isFolder && u != null && u.toString() == Prefs.lastPlayedUri(this@MainActivity)
+            v.setBackgroundColor(if (isLast) (ac and 0x00FFFFFF) or 0x33000000 else Color.TRANSPARENT)
+            holder.title.text = (if (isLast) "\u25B6 " else "") + item.title
+            holder.title.setTextColor(if (isLast) ac else tc)
+            holder.sub.text = item.sub
+            holder.sub.setTextColor((tc and 0x00FFFFFF) or 0x99000000.toInt())
             holder.badge.text = item.badge
             holder.badge.visibility = if (item.badge.isEmpty()) View.GONE else View.VISIBLE
 
@@ -703,6 +653,7 @@ class MainActivity : Activity() {
         }
     }
 
+    // ================= mini player =================
     private fun refreshMini() {
         if (!::miniBar.isInitialized) return
         if (!Engine.active || inSettings) {
@@ -739,6 +690,7 @@ class MainActivity : Activity() {
         return bar
     }
 
+    // ================= Home =================
     private fun showHome() {
         inSettings = false
         val tc = Prefs.text(this)
@@ -808,30 +760,16 @@ class MainActivity : Activity() {
         val navRow = LinearLayout(this)
         navRow.gravity = Gravity.CENTER_VERTICAL
         navRow.setPadding(0, dp(8), 0, dp(8))
-
         val tabs = LinearLayout(this)
-        tabs.addView(tabBtn("Videos", tab == 0, ac, tc) {
-            tab = 0
-            openFolder = null
-            showHome()
-        }, LinearLayout.LayoutParams(0, WC, 1f))
-        tabs.addView(tabBtn("Folders", tab == 1, ac, tc) {
-            tab = 1
-            openFolder = null
-            showHome()
-        }, LinearLayout.LayoutParams(0, WC, 1f))
-        tabs.addView(tabBtn("Music", tab == 2, ac, tc) {
-            tab = 2
-            openFolder = null
-            showHome()
-        }, LinearLayout.LayoutParams(0, WC, 1f))
-        tabs.addView(tabBtn("Playlist", tab == 3, ac, tc) {
-            tab = 3
-            openFolder = null
-            showHome()
-        }, LinearLayout.LayoutParams(0, WC, 1f))
+        val tabNames = arrayOf("Videos", "Folders", "Music", "Playlist")
+        for (i in tabNames.indices) {
+            tabs.addView(tabBtn(tabNames[i], tab == i, ac, tc) {
+                tab = i
+                openFolder = null
+                showHome()
+            }, LinearLayout.LayoutParams(0, WC, 1f))
+        }
         navRow.addView(tabs, LinearLayout.LayoutParams(0, WC, 1f))
-
         navRow.addView(sym("\u21C5", ic) { sortDialog() })
         navRow.addView(sym(if (Prefs.gridView(this)) "\u2637" else "\u2638", ic) {
             Prefs.setGridView(this, !Prefs.gridView(this))
@@ -897,29 +835,20 @@ class MainActivity : Activity() {
         val items = ArrayList<Item>()
         val of = openFolder
         val q = query.trim().lowercase()
-        val activeList = if (tab == 2) audios else videos
 
         if (q.isNotEmpty()) {
             shown = (videos + audios).filter { it.name.lowercase().contains(q) }
-            for (v in shown) {
-                items.add(Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), if (isAudio(v.uri)) "\uD83C\uDFB5" else "V"))
-            }
+            for (v in shown) items.add(itemOf(v, if (isAudio(v.uri)) "\uD83C\uDFB5" else "V"))
         } else if (tab == 3) {
             val favSet = Prefs.favs(this)
             shown = videos.filter { favSet.contains(it.uri.toString()) } + audios.filter { favSet.contains(it.uri.toString()) }
-            for (v in shown) {
-                items.add(Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), "\u2B50"))
-            }
+            for (v in shown) items.add(itemOf(v, "\u2B50"))
         } else if (tab == 2) {
             shown = audios
-            for (v in shown) {
-                items.add(Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), "\uD83C\uDFB5"))
-            }
+            for (v in shown) items.add(itemOf(v, "\uD83C\uDFB5"))
         } else if (tab == 0 || of != null) {
-            shown = if (of != null) activeList.filter { it.folder == of } else activeList
-            for (v in shown) {
-                items.add(Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), "V"))
-            }
+            shown = if (of != null) videos.filter { it.folder == of } else videos
+            for (v in shown) items.add(itemOf(v, "V"))
         } else {
             val groups = videos.groupBy { it.folder }
             val keys = groups.keys.sortedBy { folderName(it).lowercase() }
@@ -978,9 +907,17 @@ class MainActivity : Activity() {
         listHolder.addView(col, FrameLayout.LayoutParams(MP, MP))
     }
 
+    // ================= Settings =================
     private fun refreshSettings() {
         settingsY = settingsSv?.scrollY ?: 0
         showSettings()
+    }
+
+    private fun toggle(root: LinearLayout, name: String, on: Boolean, ac: Int, f: () -> Unit) {
+        root.addView(button(name + ": " + (if (on) "ON" else "OFF"), ac) {
+            f()
+            refreshSettings()
+        })
     }
 
     private fun colorPicker(root: LinearLayout, title: String, key: String) {
@@ -1069,13 +1006,13 @@ class MainActivity : Activity() {
         root.orientation = LinearLayout.VERTICAL
         root.setPadding(dp(16), dp(40), dp(16), dp(32))
 
-        root.addView(label("\u2699\uFE0F Ultra Settings", 24f, tc))
+        root.addView(label("\u2699\uFE0F Settings", 24f, tc))
         root.addView(button("\u2190 Back", ac) {
             settingsY = 0
             showHome()
         })
 
-        // Theme Presets
+        // ---- theme presets ----
         root.addView(label("Theme Presets", 16f, tc))
         val cur = Prefs.themeMode(this)
         val presetRow = HorizontalScrollView(this)
@@ -1090,33 +1027,24 @@ class MainActivity : Activity() {
         }
         presetRow.addView(pr)
         root.addView(presetRow)
+        root.addView(label("A preset sets every colour of that theme. 'None' keeps your manual colours and turns the animation off.", 12f, tc))
 
-        // Animation & Margin Controls (Up to 6.0x)
-        root.addView(label("Diamond Bonding Animation & Speed (0.5x - 6.0x)", 16f, tc))
-        root.addView(button("App Background Atomic Animation: " + (if (Prefs.atomicOn(this)) "ON" else "OFF"), ac) {
-            Prefs.setAtomicOn(this, !Prefs.atomicOn(this))
-            refreshSettings()
-        })
-        root.addView(button("Video Player Black Margin Animation: " + (if (Prefs.playerMarginAnim(this)) "ON" else "OFF"), ac) {
-            Prefs.setPlayerMarginAnim(this, !Prefs.playerMarginAnim(this))
-            refreshSettings()
-        })
-        root.addView(button("RGB Glowing Border: " + (if (Prefs.rgbBorder(this)) "ON" else "OFF"), ac) {
-            Prefs.setRgbBorder(this, !Prefs.rgbBorder(this))
-            refreshSettings()
-        })
-
-        val spTv = label("Animation Speed: " + String.format("%.1fx", Prefs.atomSpeed(this)), 14f, tc)
+        // ---- animation ----
+        root.addView(label("Animation", 16f, tc))
+        toggle(root, "Atomic Animation (app)", Prefs.atomicOn(this), ac) { Prefs.setAtomicOn(this, !Prefs.atomicOn(this)) }
+        toggle(root, "Video Margin Animation", Prefs.videoMarginAnim(this), ac) { Prefs.setVideoMarginAnim(this, !Prefs.videoMarginAnim(this)) }
+        toggle(root, "RGB Border", Prefs.rgbBorder(this), ac) { Prefs.setRgbBorder(this, !Prefs.rgbBorder(this)) }
+        val spTv = label("Animation Speed: " + String.format("%.2fx", Prefs.atomSpeed(this)), 14f, tc)
         root.addView(spTv)
         val spSb = SeekBar(this)
-        spSb.max = 110 // 0.5x + (110 * 0.05) = 6.0x
-        spSb.progress = Math.round((Prefs.atomSpeed(this) - 0.5f) / 0.05f).coerceIn(0, 110)
+        spSb.max = 110
+        spSb.progress = Math.round((Prefs.atomSpeed(this) - 0.5f) / 0.05f)
         spSb.progressTintList = ColorStateList.valueOf(ac)
         spSb.thumbTintList = ColorStateList.valueOf(ac)
         spSb.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
             override fun onProgressChanged(s: SeekBar?, p: Int, fromUser: Boolean) {
                 val v = 0.5f + p * 0.05f
-                spTv.text = "Animation Speed: " + String.format("%.1fx", v)
+                spTv.text = "Animation Speed: " + String.format("%.2fx", v)
                 if (fromUser) atomic?.setSpeedMultiplier(v)
             }
 
@@ -1128,28 +1056,19 @@ class MainActivity : Activity() {
         })
         root.addView(spSb)
 
-        // Quick Speed Presets
-        val qRow = LinearLayout(this)
-        for (sp in floatArrayOf(1f, 2f, 4f, 6f)) {
-            qRow.addView(button(String.format("%.0fx", sp), ac) {
-                Prefs.setAtomSpeed(this, sp)
-                refreshSettings()
-            }, LinearLayout.LayoutParams(0, WC, 1f))
-        }
-        root.addView(qRow)
-
-        // Playback
-        root.addView(label("Playback", 16f, tc))
-        root.addView(button("Background Audio: " + (if (Prefs.bgAudio(this)) "ON" else "OFF"), ac) {
+        // ---- video / playback ----
+        root.addView(label("Video & Playback", 16f, tc))
+        toggle(root, "Auto-rotate to match video", Prefs.autoOrient(this), ac) { Prefs.setAutoOrient(this, !Prefs.autoOrient(this)) }
+        toggle(root, "Mute audio above 4x speed", Prefs.muteFast(this), ac) { Prefs.setMuteFast(this, !Prefs.muteFast(this)) }
+        toggle(root, "Background Audio", Prefs.bgAudio(this), ac) {
             Prefs.setBgAudio(this, !Prefs.bgAudio(this))
             Engine.bgAudio = Prefs.bgAudio(this)
-            refreshSettings()
-        })
+        }
         root.addView(button("Background Activity (Battery): " + (if (Power.isIgnoring(this)) "ALLOWED \u2705" else "Tap to allow"), ac) {
             Power.request(this)
         })
         val seekSecs = intArrayOf(5, 10, 15, 20, 30)
-        val seekNames = arrayOf<CharSequence>("5 seconds", "10 seconds", "15 seconds", "20 seconds", "30 seconds")
+        val seekNames = arrayOf("5 seconds", "10 seconds", "15 seconds", "20 seconds", "30 seconds")
         root.addView(button("Double-tap Seek: " + Prefs.seekSec(this) + "s", ac) {
             AlertDialog.Builder(this)
                 .setTitle("Seek duration")
@@ -1160,22 +1079,22 @@ class MainActivity : Activity() {
                 .show()
         })
 
-        // Granular Color Pickers
-        root.addView(label("Granular Colours (Palette or Custom Hex)", 16f, tc))
-        colorPicker(root, "Background Colour", Prefs.K_BG)
-        colorPicker(root, "Accent Colour", Prefs.K_ACCENT)
-        colorPicker(root, "General Text Colour", Prefs.K_TEXT)
-        colorPicker(root, "Video Title Bar Colour", Prefs.K_VBAR)
-        colorPicker(root, "Video Title Text Colour", Prefs.K_VTEXT)
-        colorPicker(root, "Audio Title Bar Colour", Prefs.K_ABAR)
-        colorPicker(root, "Audio Title Text Colour", Prefs.K_ATEXT)
+        // ---- colours ----
+        root.addView(label("Colours (palette or custom hex)", 16f, tc))
+        colorPicker(root, "Background", Prefs.K_BG)
+        colorPicker(root, "Accent", Prefs.K_ACCENT)
+        colorPicker(root, "General Text", Prefs.K_TEXT)
+        colorPicker(root, "Video Title Bar", Prefs.K_VBAR)
+        colorPicker(root, "Video Title Text", Prefs.K_VTEXT)
+        colorPicker(root, "Audio Title Bar", Prefs.K_ABAR)
+        colorPicker(root, "Audio Title Text", Prefs.K_ATEXT)
         colorPicker(root, "General Icon Colour", Prefs.K_ICON)
         root.addView(button("Reset all colours to theme", ac) {
             Prefs.resetColors(this)
             refreshSettings()
         })
 
-        // Wallpaper
+        // ---- wallpaper ----
         root.addView(label("Wallpaper", 16f, tc))
         root.addView(button("Choose Wallpaper", ac) { pickWall() })
         root.addView(button("Remove Wallpaper", ac) {

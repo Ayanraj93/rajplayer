@@ -2,7 +2,6 @@ package com.raj.rajplayer
 
 import android.app.Activity
 import android.app.AlertDialog
-import android.content.Intent
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
 import android.graphics.Color
@@ -46,7 +45,7 @@ class AudioActivity : Activity() {
     private val pool = Executors.newSingleThreadExecutor()
     private var userSeeking = false
     private var artKey = ""
-    private val speeds = floatArrayOf(0.75f, 1f, 1.25f, 1.5f, 2f, 2.5f, 3f, 4f, 6f)
+    private val speeds = floatArrayOf(0.75f, 1f, 1.25f, 1.5f, 2f)
     private var speedIdx = 1
     private val rgbTargets = ArrayList<(Int) -> Unit>()
 
@@ -91,20 +90,9 @@ class AudioActivity : Activity() {
         t.textSize = size
         t.setTextColor(color)
         t.gravity = Gravity.CENTER
-        t.setPadding(dp(10), dp(8), dp(10), dp(8))
+        t.setPadding(dp(12), dp(8), dp(12), dp(8))
         t.setOnClickListener { f(t) }
         return t
-    }
-
-    @Suppress("DEPRECATION")
-    private fun extractIncomingUri(): Uri? {
-        if (intent?.action == Intent.ACTION_SEND) {
-            val stream = intent.getParcelableExtra<Uri>(Intent.EXTRA_STREAM)
-            if (stream != null) return stream
-            val cd = intent.clipData
-            if (cd != null && cd.itemCount > 0) return cd.getItemAt(0).uri
-        }
-        return intent?.data
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -114,12 +102,11 @@ class AudioActivity : Activity() {
         var names: List<String> = emptyList()
         var index = 0
         if (!cont) {
-            val u0 = extractIncomingUri()
+            val u0 = intent.data
             if (u0 == null) {
                 finish()
                 return
             }
-            Prefs.setLastPlayed(this, u0.toString())
             val l = intent.getStringArrayListExtra("list")
             uris = if (l != null && l.isNotEmpty()) l.map { Uri.parse(it) } else listOf(u0)
             val nm = intent.getStringArrayListExtra("names")
@@ -151,9 +138,10 @@ class AudioActivity : Activity() {
             }
         }
 
+        // atomic animation: background me, touch nahi pakadta
         var atomic: AtomicView? = null
         if (Prefs.atomicOn(this) && Prefs.themeMode(this) != "none") {
-            val av = AtomicView(this, false)
+            val av = AtomicView(this)
             atomic = av
             root.addView(av, FrameLayout.LayoutParams(MP, MP))
         }
@@ -163,6 +151,7 @@ class AudioActivity : Activity() {
         col.gravity = Gravity.CENTER_HORIZONTAL
         col.setPadding(dp(24), dp(36), dp(24), dp(16))
 
+        // ---- top row (audio title bar) ----
         val top = LinearLayout(this)
         top.gravity = Gravity.CENTER_VERTICAL
         top.setBackgroundColor(bar)
@@ -181,7 +170,8 @@ class AudioActivity : Activity() {
         })
         col.addView(top, LinearLayout.LayoutParams(MP, WC))
 
-        val artSize = Math.min(resources.displayMetrics.widthPixels - dp(64), dp(320))
+        // ---- album art ----
+        val artSize = Math.min(resources.displayMetrics.widthPixels - dp(64), dp(340))
         val artBox = FrameLayout(this)
         val g = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(ac, 0xFF000000.toInt()))
         artBox.background = g
@@ -204,6 +194,7 @@ class AudioActivity : Activity() {
         col.addView(artBox, alp)
         atomic?.excludeView(artBox)
 
+        // ---- title ----
         titleTv = TextView(this)
         titleTv.textSize = 20f
         titleTv.setTextColor(tc)
@@ -219,6 +210,7 @@ class AudioActivity : Activity() {
         subTv.setPadding(0, dp(4), 0, dp(12))
         col.addView(subTv, LinearLayout.LayoutParams(MP, WC))
 
+        // ---- seek ----
         val seekRow = LinearLayout(this)
         seekRow.gravity = Gravity.CENTER_VERTICAL
         curTv = TextView(this)
@@ -251,6 +243,7 @@ class AudioActivity : Activity() {
         seekRow.addView(durTv)
         col.addView(seekRow, LinearLayout.LayoutParams(MP, WC))
 
+        // ---- transport ----
         val tr = LinearLayout(this)
         tr.gravity = Gravity.CENTER
         shufBtn = ib("\uD83D\uDD00", 22f, ic) {
@@ -275,10 +268,11 @@ class AudioActivity : Activity() {
         tr.addView(repBtn)
         col.addView(tr, LinearLayout.LayoutParams(MP, WC))
 
+        // ---- extras ----
         val ex = LinearLayout(this)
         ex.gravity = Gravity.CENTER
         ex.setPadding(0, dp(12), 0, 0)
-        ex.addView(ib("1.0x", 14f, ic) { b ->
+        ex.addView(ib("1x", 14f, ic) { b ->
             speedIdx = (speedIdx + 1) % speeds.size
             Engine.mp?.setRate(speeds[speedIdx])
             b.text = speeds[speedIdx].toString() + "x"
@@ -293,6 +287,7 @@ class AudioActivity : Activity() {
         if (Prefs.rgbBorder(this)) root.addView(RgbBorderView(this), FrameLayout.LayoutParams(MP, MP))
         setContentView(root)
 
+        // RGB theme: kuch cheezein rang badalti rehti hain
         if (rgbAcc) {
             rgbTargets.add { c ->
                 seek.progressTintList = ColorStateList.valueOf(c)
@@ -316,12 +311,11 @@ class AudioActivity : Activity() {
     }
 
     private fun onItem() {
-        if (!Engine.active) {
+        if (!Engine.active || Engine.items.isEmpty()) {
             finish()
             return
         }
-        val curUri = Engine.items.getOrNull(Engine.idx)
-        if (curUri != null) Prefs.setLastPlayed(this, curUri.toString())
+        Prefs.setLastPlayedUri(this, Engine.cur().toString())
         titleTv.text = Engine.title
         subTv.text = (Engine.idx + 1).toString() + " / " + Engine.items.size
         loadArt()
@@ -354,8 +348,8 @@ class AudioActivity : Activity() {
 
     private fun update() {
         val p = Engine.mp ?: return
-        val len = p.length
-        val t = p.time
+        val len = p.getLength()
+        val t = p.getTime()
         if (len > 0) {
             if (!userSeeking) {
                 seek.max = len.toInt()
@@ -368,13 +362,13 @@ class AudioActivity : Activity() {
     }
 
     private fun menu() {
-        val opts = arrayOf<CharSequence>(
-            "\uD83C\uDF9A\uFE0F Equalizer",
-            "\uD83D\uDD0A Audio Boost",
-            "\u23F1\uFE0F Sleep Timer",
-            "\uD83D\uDCC3 Songs Queue",
-            "\uD83D\uDD0B Allow Background (Battery)",
-            "\u23F9 Stop & Close"
+        val opts = arrayOf(
+            "Equalizer",
+            "Audio Boost",
+            "Sleep Timer",
+            "Songs Queue",
+            "Allow Background (Battery)",
+            "Stop & Close"
         )
         AlertDialog.Builder(this)
             .setItems(opts) { _, i ->
@@ -388,6 +382,7 @@ class AudioActivity : Activity() {
                         Engine.stopAll(this)
                         finish()
                     }
+                    else -> {}
                 }
             }
             .show()
@@ -395,12 +390,9 @@ class AudioActivity : Activity() {
 
     private fun queueDialog() {
         val n = Engine.items.size
-        val last = Prefs.lastPlayed(this)
-        val arr = Array<CharSequence>(n) { k ->
-            val uStr = Engine.items[k].toString()
+        val arr = Array(n) { k ->
             val nm = Engine.names.getOrNull(k) ?: Engine.items[k].lastPathSegment ?: "Track"
-            val prefix = if (k == Engine.idx || uStr == last) "\u25B6 " else ""
-            prefix + (k + 1) + ". " + nm
+            (if (k == Engine.idx) "\u25B6 " else "") + (k + 1) + ". " + nm
         }
         AlertDialog.Builder(this)
             .setTitle("Songs Queue")

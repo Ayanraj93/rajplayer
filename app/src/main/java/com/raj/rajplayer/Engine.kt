@@ -144,10 +144,10 @@ object Engine {
     private fun onEnded() {
         if (items.isEmpty()) return
         Prefs.setPos(app, items[idx].toString(), 0L)
-        val rep = Prefs.repeat(app)
+        val rep = Prefs.repeatFor(app, isVideo)
         if (rep == 2) {
             loadAt(app, idx)
-        } else if (Prefs.shuffle(app) && items.size > 1) {
+        } else if (Prefs.shuffleFor(app, isVideo) && items.size > 1) {
             loadAt(app, randomOther())
         } else if (idx + 1 < items.size) {
             loadAt(app, idx + 1)
@@ -201,6 +201,7 @@ object Engine {
         val uri = items[idx]
         title = names.getOrNull(idx) ?: nameOf(app, uri)
         pendingSeek = Prefs.pos(app, uri.toString())
+        Prefs.setLastPlayedUri(app, uri.toString())
         voutEver = false
         vout = 0
         val old = pfd
@@ -262,9 +263,9 @@ object Engine {
 
     fun next(ctx: Context) {
         if (items.isEmpty()) return
-        if (Prefs.shuffle(app) && items.size > 1) loadAt(ctx, randomOther())
+        if (Prefs.shuffleFor(app, isVideo) && items.size > 1) loadAt(ctx, randomOther())
         else if (idx + 1 < items.size) loadAt(ctx, idx + 1)
-        else if (Prefs.repeat(app) == 1) loadAt(ctx, 0)
+        else if (Prefs.repeatFor(app, isVideo) == 1) loadAt(ctx, 0)
     }
 
     fun prev(ctx: Context) {

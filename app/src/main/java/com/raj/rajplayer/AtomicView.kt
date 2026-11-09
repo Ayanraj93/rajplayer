@@ -8,15 +8,20 @@ import android.graphics.Paint
 import android.graphics.Rect
 import android.graphics.RectF
 import android.graphics.SweepGradient
-import android.os.Build
 import android.view.Choreographer
+import android.view.SurfaceView
+import android.view.TextureView
 import android.view.View
+import android.view.ViewGroup
 import java.lang.ref.WeakReference
 import kotlin.math.cos
 import kotlin.math.hypot
 import kotlin.math.sin
 
-class AtomicView(ctx: Context, private val isVideoMarginMode: Boolean = false) : View(ctx) {
+// "Diamond bonding" atomic animation. Sirf background / margins me chalta hai:
+//  - touch kabhi nahi pakadta
+//  - excludeView / excludeRect / excludeSurfacesIn wale hisse (video surface) me kuch nahi banata
+class AtomicView(ctx: Context, private val forVideo: Boolean = false) : View(ctx) {
 
     private class Node(val bx: Float, val by: Float, val p1: Float, val p2: Float, val sp: Float) {
         var x = bx
@@ -31,16 +36,18 @@ class AtomicView(ctx: Context, private val isVideoMarginMode: Boolean = false) :
     private var last = 0L
     private var running = false
     private var active = true
+    private var paused = false
     private var mode = "dark"
     private var speed = 1f
+    var maxAlpha = 120
 
     private val bondPaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val nodePaint = Paint(Paint.ANTI_ALIAS_FLAG)
     private val hsv = floatArrayOf(0f, 0.85f, 1f)
     private val excluded = ArrayList<WeakReference<View>>()
+    private val groups = ArrayList<WeakReference<ViewGroup>>()
     private val rects = ArrayList<Rect>()
-    private val loc = IntArray(2)
-    private val loc2 = IntArray(2)
+    private val own = Rect()
     private val tmp = Rect()
 
     private val cPink = Color.parseColor("#FF4081")
@@ -49,54 +56,47 @@ class AtomicView(ctx: Context, private val isVideoMarginMode: Boolean = false) :
     private val cG1 = Color.parseColor("#E040FB")
     private val cG2 = Color.parseColor("#00E5FF")
 
-    var maxAlpha = 140
-
     init {
         isClickable = false
         isFocusable = false
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         bondPaint.style = Paint.Style.STROKE
-        bondPaint.strokeWidth = 1.4f * d
+        bondPaint.strokeWidth = 1.3f * d
         bondPaint.strokeCap = Paint.Cap.ROUND
         nodePaint.style = Paint.Style.FILL
         applyPrefs()
     }
 
+    // ---- public API ----
     fun applyPrefs() {
         mode = Prefs.themeMode(context)
         speed = Prefs.atomSpeed(context)
-        active = if (isVideoMarginMode) {
-            Prefs.playerMarginAnim(context) && mode != "none"
-        } else {
-            Prefs.atomicOn(context) && mode != "none"
-        }
+        maxAlpha = if (forVideo) 150 else 120
+        active = (if (forVideo) Prefs.videoMarginAnim(context) else Prefs.atomicOn(context)) && mode != "none"
         visibility = if (active) VISIBLE else GONE
         syncLoop()
-        invalidate()
     }
 
-    fun setThemeMode(m: String) {
-        mode = m
-        applyPrefs()
+    // 0.5x .. 6.0x
+    fun setSpeedMultiplier(m: Float) { speed = m.coerceIn(0.5f, 6f) }
+
+    // tez playback me CPU bachane ke liye
+    fun setPaused(p: Boolean) {
+        paused = p
+        syncLoop()
     }
 
-    fun setSpeedMultiplier(m: Float) {
-        speed = m.coerceIn(0.5f, 6f)
-    }
-
-    fun excludeView(v: View) {
-        excluded.add(WeakReference(v))
-    }
-
-    fun excludeRect(r: Rect) {
-        rects.add(Rect(r))
-    }
+    fun excludeView(v: View) { excluded.add(WeakReference(v)) }
+    fun excludeSurfacesIn(g: ViewGroup) { groups.add(WeakReference(g)) }
+    fun excludeRect(r: Rect) { rects.add(Rect(r)) }
 
     fun clearExclusions() {
         excluded.clear()
+        groups.clear()
         rects.clear()
     }
 
+    // ---- layout ----
     override fun onSizeChanged(w: Int, h: Int, ow: Int, oh: Int) {
         super.onSizeChanged(w, h, ow, oh)
         build(w, h)
@@ -105,7 +105,7 @@ class AtomicView(ctx: Context, private val isVideoMarginMode: Boolean = false) :
     private fun build(w: Int, h: Int) {
         nodes.clear()
         if (w <= 0 || h <= 0) return
-        spacing = 58f * d
+        spacing = 60f * d
         val cols = (w / spacing).toInt() + 2
         val rows = (h / spacing).toInt() + 2
         val rnd = java.util.Random(7)
@@ -122,7 +122,7 @@ class AtomicView(ctx: Context, private val isVideoMarginMode: Boolean = false) :
                 }
             }
         }
-        val lim = spacing * 1.55f
+        val lim = spacing * 1.5f
         val pairs = ArrayList<Int>()
         for (a in 0 until nodes.size) {
             for (b in (a + 1) until nodes.size) {
@@ -137,12 +137,13 @@ class AtomicView(ctx: Context, private val isVideoMarginMode: Boolean = false) :
         bonds = pairs.toIntArray()
     }
 
+    // ---- frame loop (~30 fps) ----
     private val frameCb = object : Choreographer.FrameCallback {
         override fun doFrame(frameTimeNanos: Long) {
             if (!running) return
             if (last == 0L) last = frameTimeNanos
             val dt = (frameTimeNanos - last) / 1_000_000_000f
-            if (dt >= 0.030f) {
+            if (dt >= 0.032f) {
                 last = frameTimeNanos
                 time += dt.coerceAtMost(0.1f) * speed
                 move()
@@ -153,7 +154,7 @@ class AtomicView(ctx: Context, private val isVideoMarginMode: Boolean = false) :
     }
 
     private fun syncLoop() {
-        val want = active && isAttachedToWindow && windowVisibility == VISIBLE
+        val want = active && !paused && isAttachedToWindow && windowVisibility == VISIBLE
         if (want && !running) {
             running = true
             last = 0L
@@ -180,13 +181,14 @@ class AtomicView(ctx: Context, private val isVideoMarginMode: Boolean = false) :
     }
 
     private fun move() {
-        val r = spacing * 0.24f
+        val r = spacing * 0.2f
         for (n in nodes) {
             n.x = n.bx + cos(time * n.sp + n.p1) * r
-            n.y = n.by + sin(time * n.sp * 0.85f + n.p2) * r
+            n.y = n.by + sin(time * n.sp * 0.8f + n.p2) * r
         }
     }
 
+    // ---- colours ----
     private fun hue(deg: Float): Int {
         hsv[0] = ((deg % 360f) + 360f) % 360f
         return Color.HSVToColor(hsv)
@@ -212,33 +214,47 @@ class AtomicView(ctx: Context, private val isVideoMarginMode: Boolean = false) :
 
     private fun withAlpha(c: Int, a: Int): Int = (a.coerceIn(0, 255) shl 24) or (c and 0x00FFFFFF)
 
-    @Suppress("DEPRECATION")
-    private fun clipOutCompat(canvas: Canvas, rect: Rect) {
-        if (Build.VERSION.SDK_INT >= 26) {
-            canvas.clipOutRect(rect)
-        } else {
-            canvas.clipRect(rect, android.graphics.Region.Op.DIFFERENCE)
+    // ---- draw ----
+    private fun clipSurfaces(v: View, canvas: Canvas, ox: Int, oy: Int) {
+        if (v is SurfaceView || v is TextureView) {
+            if (v.isShown && v.getGlobalVisibleRect(tmp)) {
+                tmp.offset(-ox, -oy)
+                canvas.clipOutRect(tmp)
+            }
+            return
+        }
+        if (v is ViewGroup) {
+            for (i in 0 until v.childCount) clipSurfaces(v.getChildAt(i), canvas, ox, oy)
         }
     }
 
     private fun clipExclusions(canvas: Canvas) {
-        if (excluded.isEmpty() && rects.isEmpty()) return
-        getLocationInWindow(loc)
-        val iter = excluded.iterator()
-        while (iter.hasNext()) {
-            val v = iter.next().get()
+        if (excluded.isEmpty() && groups.isEmpty() && rects.isEmpty()) return
+        if (!getGlobalVisibleRect(own)) return
+        val ox = own.left
+        val oy = own.top
+        val it1 = excluded.iterator()
+        while (it1.hasNext()) {
+            val v = it1.next().get()
             if (v == null) {
-                iter.remove()
+                it1.remove()
                 continue
             }
-            if (!v.isShown || v.width <= 0 || v.height <= 0) continue
-            v.getLocationInWindow(loc2)
-            val l = loc2[0] - loc[0]
-            val t = loc2[1] - loc[1]
-            tmp.set(l, t, l + v.width, t + v.height)
-            clipOutCompat(canvas, tmp)
+            if (v.isShown && v.getGlobalVisibleRect(tmp)) {
+                tmp.offset(-ox, -oy)
+                canvas.clipOutRect(tmp)
+            }
         }
-        for (r in rects) clipOutCompat(canvas, r)
+        val it2 = groups.iterator()
+        while (it2.hasNext()) {
+            val g = it2.next().get()
+            if (g == null) {
+                it2.remove()
+                continue
+            }
+            clipSurfaces(g, canvas, ox, oy)
+        }
+        for (r in rects) canvas.clipOutRect(r)
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -263,15 +279,16 @@ class AtomicView(ctx: Context, private val isVideoMarginMode: Boolean = false) :
         val pulse = 0.5f + 0.5f * sin(time * 2f)
         for (n in nodes) {
             val c = colorAt(n.x)
-            nodePaint.color = withAlpha(c, (maxAlpha * 0.38f).toInt())
+            nodePaint.color = withAlpha(c, (maxAlpha * 0.35f).toInt())
             canvas.drawCircle(n.x, n.y, (5f + 2f * pulse) * d, nodePaint)
-            nodePaint.color = withAlpha(c, (maxAlpha * 1.45f).toInt())
-            canvas.drawCircle(n.x, n.y, 2.3f * d, nodePaint)
+            nodePaint.color = withAlpha(c, (maxAlpha * 1.4f).toInt())
+            canvas.drawCircle(n.x, n.y, 2.2f * d, nodePaint)
         }
         canvas.restoreToCount(save)
     }
 }
 
+// Ghoomta hua RGB border (screen ke kinaare). Touch nahi pakadta.
 class RgbBorderView(ctx: Context) : View(ctx) {
 
     private val d = ctx.resources.displayMetrics.density
@@ -308,7 +325,7 @@ class RgbBorderView(ctx: Context) : View(ctx) {
             if (last == 0L) last = frameTimeNanos
             val dt = (frameTimeNanos - last) / 1_000_000_000f
             last = frameTimeNanos
-            angle = (angle + dt.coerceAtMost(0.1f) * 90f * Prefs.atomSpeed(context)) % 360f
+            angle = (angle + dt.coerceAtMost(0.1f) * 90f) % 360f
             invalidate()
             Choreographer.getInstance().postFrameCallback(this)
         }

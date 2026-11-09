@@ -9,7 +9,6 @@ import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
 
-// Battery / background permission + wake lock
 object Power {
     private var wl: PowerManager.WakeLock? = null
 
@@ -40,7 +39,6 @@ object Power {
         }
     }
 
-    // pehli baar permission maangta hai
     fun askOnce(a: Activity) {
         try {
             val sp = a.getSharedPreferences("rajplayer_ultra", Context.MODE_PRIVATE)
@@ -58,7 +56,6 @@ object Power {
         }
     }
 
-    // Playback ke time CPU jaagta rahe (screen off me bhi)
     fun wake(c: Context, on: Boolean) {
         try {
             if (on) {
@@ -79,13 +76,8 @@ object Power {
     }
 }
 
-// Optional features (Convert / Orient) ke liye safe jodne wale hooks
 object Hooks {
     fun convert(a: Activity, uris: List<Uri>, names: List<String>, fin: (() -> Unit)?) {
         Toast.makeText(a, "Convert feature installed nahi hai", Toast.LENGTH_SHORT).show()
-    }
-
-    fun videoClass(c: Context, uri: Uri?): Class<*> {
-        return PlayerActivity::class.java
     }
 }

@@ -3,6 +3,7 @@ package com.raj.rajplayer
 import android.content.Context
 import android.graphics.Color
 
+// Theme presets: rgb | pink | dark | light | gradient | none
 object Theme {
     val MODES = arrayOf("rgb", "pink", "dark", "light", "gradient", "none")
     val NAMES = arrayOf("RGB", "Pink", "Dark", "Light", "Gradient", "None")
@@ -12,8 +13,7 @@ object Theme {
         return Color.HSVToColor(floatArrayOf(h, 0.85f, 1f))
     }
 
-    fun rgbNow(offset: Float): Int =
-        hueAt((System.currentTimeMillis() / 20L % 360L).toFloat() + offset)
+    fun rgbNow(offset: Float): Int = hueAt((System.currentTimeMillis() / 20L % 360L).toFloat() + offset)
 
     fun accentOf(mode: String): Int = when (mode) {
         "rgb" -> rgbNow(0f)
@@ -48,6 +48,7 @@ object Theme {
 object Prefs {
     private fun p(c: Context) = c.getSharedPreferences("rajplayer_ultra", Context.MODE_PRIVATE)
 
+    // purane keys (bg/text/accent) wahi hain, isliye manual rang jas ke tas rehte hain
     const val K_BG = "bg"
     const val K_TEXT = "text"
     const val K_ACCENT = "accent"
@@ -95,24 +96,30 @@ object Prefs {
     fun setText(c: Context, v: Int) = setColor(c, K_TEXT, v)
     fun setAccent(c: Context, v: Int) = setColor(c, K_ACCENT, v)
 
-    // Global Atomic Animation
+    // ---- animation ----
     fun atomicOn(c: Context): Boolean = p(c).getBoolean("atomic_on", true)
     fun setAtomicOn(c: Context, v: Boolean) { p(c).edit().putBoolean("atomic_on", v).apply() }
 
-    // Independent Video Player Black Margin Animation Toggle
-    fun playerMarginAnim(c: Context): Boolean = p(c).getBoolean("player_margin_anim", true)
-    fun setPlayerMarginAnim(c: Context, v: Boolean) { p(c).edit().putBoolean("player_margin_anim", v).apply() }
+    fun videoMarginAnim(c: Context): Boolean = p(c).getBoolean("vmargin_anim", true)
+    fun setVideoMarginAnim(c: Context, v: Boolean) { p(c).edit().putBoolean("vmargin_anim", v).apply() }
 
-    // Animation Speed: 0.5x up to 6.0x
+    // 0.5x .. 6.0x
     fun atomSpeed(c: Context): Float = p(c).getFloat("atom_speed", 1f).coerceIn(0.5f, 6f)
     fun setAtomSpeed(c: Context, v: Float) { p(c).edit().putFloat("atom_speed", v.coerceIn(0.5f, 6f)).apply() }
 
     fun rgbBorder(c: Context): Boolean = p(c).getBoolean("rgb_border", false)
     fun setRgbBorder(c: Context, v: Boolean) { p(c).edit().putBoolean("rgb_border", v).apply() }
 
-    // Last Played Media URI Highlight Tracking
-    fun lastPlayed(c: Context): String = p(c).getString("last_played_uri", "") ?: ""
-    fun setLastPlayed(c: Context, uriStr: String) { p(c).edit().putString("last_played_uri", uriStr).apply() }
+    // ---- video behaviour ----
+    fun autoOrient(c: Context): Boolean = p(c).getBoolean("auto_orient", true)
+    fun setAutoOrient(c: Context, v: Boolean) { p(c).edit().putBoolean("auto_orient", v).apply() }
+
+    fun muteFast(c: Context): Boolean = p(c).getBoolean("mute_fast", true)
+    fun setMuteFast(c: Context, v: Boolean) { p(c).edit().putBoolean("mute_fast", v).apply() }
+
+    // ---- last played ----
+    fun lastPlayedUri(c: Context): String? = p(c).getString("last_uri", null)
+    fun setLastPlayedUri(c: Context, v: String?) { p(c).edit().putString("last_uri", v).apply() }
 
     fun wall(c: Context): String? = p(c).getString("wall", null)
     fun setWall(c: Context, v: String?) { p(c).edit().putString("wall", v).apply() }
@@ -142,11 +149,21 @@ object Prefs {
     fun bgAudio(c: Context): Boolean = p(c).getBoolean("bg_audio2", true)
     fun setBgAudio(c: Context, v: Boolean) { p(c).edit().putBoolean("bg_audio2", v).apply() }
 
+    // audio ke repeat/shuffle
     fun repeat(c: Context): Int = p(c).getInt("repeat", 0)
     fun setRepeat(c: Context, v: Int) { p(c).edit().putInt("repeat", v).apply() }
-
     fun shuffle(c: Context): Boolean = p(c).getBoolean("shuffle", false)
     fun setShuffle(c: Context, v: Boolean) { p(c).edit().putBoolean("shuffle", v).apply() }
+
+    // video aur audio ke repeat/shuffle alag-alag
+    fun repeatFor(c: Context, video: Boolean): Int = if (video) p(c).getInt("v_repeat", 0) else repeat(c)
+    fun setRepeatFor(c: Context, video: Boolean, v: Int) {
+        if (video) p(c).edit().putInt("v_repeat", v).apply() else setRepeat(c, v)
+    }
+    fun shuffleFor(c: Context, video: Boolean): Boolean = if (video) p(c).getBoolean("v_shuffle", false) else shuffle(c)
+    fun setShuffleFor(c: Context, video: Boolean, v: Boolean) {
+        if (video) p(c).edit().putBoolean("v_shuffle", v).apply() else setShuffle(c, v)
+    }
 
     fun favs(c: Context): Set<String> {
         return p(c).getStringSet("fav_uris", emptySet()) ?: emptySet()
@@ -167,6 +184,7 @@ object Prefs {
 
     fun isFav(c: Context, uriStr: String): Boolean = favs(c).contains(uriStr)
 
+    // ---- bookmarks ----
     fun bms(c: Context, key: String): List<Long> {
         val s = p(c).getString("bm_" + key, "") ?: ""
         if (s.isEmpty()) return emptyList()
@@ -178,7 +196,4 @@ object Prefs {
         if (v.isEmpty()) e.remove("bm_" + key) else e.putString("bm_" + key, v.joinToString(","))
         e.apply()
     }
-
-    fun lastPlayedUri(c: Context): String? = p(c).getString("last_played_uri", null)
-    fun setLastPlayedUri(c: Context, uri: String?) { p(c).edit().putString("last_played_uri", uri).apply() }
 }

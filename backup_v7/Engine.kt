@@ -17,6 +17,7 @@ import android.widget.Toast
 import org.videolan.libvlc.LibVLC
 import org.videolan.libvlc.Media
 import org.videolan.libvlc.MediaPlayer
+import org.videolan.libvlc.util.VLCVideoLayout
 
 object Engine {
 
@@ -26,6 +27,7 @@ object Engine {
 
     var vlc: LibVLC? = null
     var mp: MediaPlayer? = null
+    var vlayout: VLCVideoLayout? = null
     var items: List<Uri> = emptyList()
     var names: List<String> = emptyList()
     var idx = 0
@@ -34,6 +36,9 @@ object Engine {
     var active = false
     var ended = false
     var bgAudio = false
+    var voutEver = false
+    var vout = 0
+    var forceSoft = false
     var listener: Listener? = null
 
     private lateinit var app: Context
@@ -50,7 +55,6 @@ object Engine {
         notifyChanged()
     }
 
-    // ---------- wake locks: screen off me bhi CPU/WiFi jaga rahe ----------
     private fun holdLocks() {
         try {
             var w = wake
@@ -60,7 +64,7 @@ object Engine {
                 w.setReferenceCounted(false)
                 wake = w
             }
-            if (!w.isHeld) w.acquire(6 * 60 * 60 * 1000L)
+            if (w?.isHeld == false) w.acquire(6 * 60 * 60 * 1000L)
 
             val u = items.getOrNull(idx)
             val net = u != null && (u.scheme == "http" || u.scheme == "https" ||
@@ -73,7 +77,7 @@ object Engine {
                     f.setReferenceCounted(false)
                     wifi = f
                 }
-                if (!f.isHeld) f.acquire()
+                if (f?.isHeld == false) f.acquire()
             }
         } catch (e: Exception) {
         }
@@ -82,14 +86,13 @@ object Engine {
     private fun releaseLocks() {
         try {
             val w = wake
-            if (w != null && w.isHeld) w.release()
+            if (w?.isHeld == true) w.release()
             val f = wifi
-            if (f != null && f.isHeld) f.release()
+            if (f?.isHeld == true) f.release()
         } catch (e: Exception) {
         }
     }
 
-    // ---------- player ----------
     fun ensure(ctx: Context): MediaPlayer {
         app = ctx.applicationContext
         val existing = mp
@@ -109,6 +112,8 @@ object Engine {
         val p = mp ?: return
         if (t == MediaPlayer.Event.Playing) {
             errStreak = 0
+            voutEver = true
+            vout = 1
             if (pendingSeek > 0) {
                 p.setTime(pendingSeek)
                 pendingSeek = 0
@@ -125,7 +130,6 @@ object Engine {
         }
     }
 
-    // kharab file aaye to agle par chale jao (5 baar se zyada lagatar nahi)
     private fun onError() {
         errStreak++
         if (errStreak > 5 || items.isEmpty() || idx + 1 >= items.size) {
@@ -197,6 +201,8 @@ object Engine {
         val uri = items[idx]
         title = names.getOrNull(idx) ?: nameOf(app, uri)
         pendingSeek = Prefs.pos(app, uri.toString())
+        voutEver = false
+        vout = 0
         val old = pfd
         try {
             val media: Media
@@ -207,7 +213,7 @@ object Engine {
                 pfd = null
                 media = Media(vlc!!, uri)
             }
-            media.setHWDecoderEnabled(Prefs.hw(app), false)
+            media.setHWDecoderEnabled(!forceSoft && Prefs.hw(app), false)
             p.setMedia(media)
             media.release()
             resumeOnFocus = false
@@ -309,7 +315,6 @@ object Engine {
         PlaybackService.instance?.refresh()
     }
 
-    // ---------- audio focus: notification/call ke baad gaana wapas chale ----------
     private fun requestFocus() {
         try {
             val am = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
@@ -346,15 +351,15 @@ object Engine {
                     .build()
                 focusReq = r
             }
-            am.requestAudioFocus(r)
+            if (r != null) {
+                am.requestAudioFocus(r)
+            }
         } catch (e: Exception) {
         }
     }
 }
 
-// Equalizer / Boost / Sleep dialogs: Audio aur Video dono screen me kaam aate hain
 object Dialogs {
-
     fun eq(a: Activity) {
         val p = Engine.mp ?: return
         val n = MediaPlayer.Equalizer.getPresetCount()

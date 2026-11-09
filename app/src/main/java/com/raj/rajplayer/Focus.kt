@@ -4,11 +4,11 @@ import android.media.AudioManager
 import android.os.Handler
 import android.os.Looper
 
+// Lock sound / call ke baad audio wapas apne aap chalu
 object Focus {
     private val h = Handler(Looper.getMainLooper())
     private var pausedByFocus = false
 
-    // true = abhi pause karo
     fun handle(c: Int): Boolean {
         if (c == AudioManager.AUDIOFOCUS_LOSS) {
             pausedByFocus = false
