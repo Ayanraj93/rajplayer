@@ -43,9 +43,9 @@ import java.util.concurrent.Executors
 
 class MainActivity : Activity() {
 
-    data class V(val name: String, val uri: Uri, val dur: Long, val size: Long, val folder: String, val date: Long)
-    data class Item(val title: String, val sub: String, val uri: Uri?, val badge: String, val tag: String)
-    class H(val check: TextView, val thumb: ImageView, val badge: TextView, val title: TextView, val sub: TextView)
+    data class V(val name: String, val uri: Uri, val dur: Long, val size: Long, val folder: String, val date: Long, val w: Int, val h: Int)
+    data class Item(val title: String, val sub: String, val uri: Uri?, val badge: String, val tag: String, val res: String)
+    class H(val check: TextView, val thumb: ImageView, val badge: TextView, val title: TextView, val sub: TextView, val info: TextView)
 
     private val MP = ViewGroup.LayoutParams.MATCH_PARENT
     private val WC = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -60,6 +60,7 @@ class MainActivity : Activity() {
     private var atomic: AtomicView? = null
     private var settingsSv: ScrollView? = null
     private var settingsY = 0
+    private var infoPosted = false
 
     @Volatile private var videos: List<V> = emptyList()
     @Volatile private var audios: List<V> = emptyList()
@@ -333,13 +334,34 @@ class MainActivity : Activity() {
         return if (s.isEmpty()) "Internal Storage" else s
     }
 
-    private fun itemOf(v: V, badge: String) =
-        Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), badge)
+    private fun itemOf(v: V, badge: String): Item {
+        val res = if (isAudio(v.uri) || v.w <= 0 || v.h <= 0) "" else VideoInfo.resLabel(v.w, v.h)
+        return Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), badge, res)
+    }
+
+    // FPS peeche pata chalne par list ko halka sa refresh
+    private fun infoRefresh() {
+        if (infoPosted) return
+        infoPosted = true
+        ui.postDelayed({
+            infoPosted = false
+            curAdapter?.notifyDataSetChanged()
+        }, 600)
+    }
 
     // ================= media load (background thread) =================
     private fun queryMedia(video: Boolean): List<V> {
         val base = if (video) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
-        val proj = arrayOf(
+        val proj = if (video) arrayOf(
+            MediaStore.MediaColumns._ID,
+            MediaStore.MediaColumns.DISPLAY_NAME,
+            MediaStore.MediaColumns.DURATION,
+            MediaStore.MediaColumns.SIZE,
+            MediaStore.MediaColumns.RELATIVE_PATH,
+            MediaStore.MediaColumns.DATE_ADDED,
+            MediaStore.MediaColumns.WIDTH,
+            MediaStore.MediaColumns.HEIGHT
+        ) else arrayOf(
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DISPLAY_NAME,
             MediaStore.MediaColumns.DURATION,
@@ -352,11 +374,13 @@ class MainActivity : Activity() {
         try {
             contentResolver.query(base, proj, sel, null, null)?.use { c ->
                 while (c.moveToNext()) {
+                    val w = if (video) c.getInt(6) else 0
+                    val h = if (video) c.getInt(7) else 0
                     out.add(
                         V(
                             c.getString(1) ?: "media",
                             ContentUris.withAppendedId(base, c.getLong(0)),
-                            c.getLong(2), c.getLong(3), c.getString(4) ?: "", c.getLong(5)
+                            c.getLong(2), c.getLong(3), c.getString(4) ?: "", c.getLong(5), w, h
                         )
                     )
                 }
@@ -451,6 +475,48 @@ class MainActivity : Activity() {
             .show()
     }
 
+    // ================= long-press menu =================
+    private fun rowMenu(chosen: Item) {
+        val u = chosen.uri ?: return
+        val v = shown.firstOrNull { it.uri == u } ?: return
+        val fav = Prefs.isFav(this, u.toString())
+        val aud = isAudio(u)
+        val opts = arrayOf(
+            "Details / Info",
+            "Select (tick)",
+            "Play",
+            if (fav) "Remove from Playlist" else "Add to Playlist",
+            "Convert to Audio",
+            "Delete"
+        )
+        AlertDialog.Builder(this)
+            .setTitle(v.name)
+            .setItems(opts) { _, i ->
+                when (i) {
+                    0 -> VideoInfo.show(this, u, v.name)
+                    1 -> {
+                        selectMode = true
+                        selected.add(u.toString())
+                        showHome()
+                    }
+                    2 -> playList(shown, shown.indexOfFirst { it.uri == u })
+                    3 -> {
+                        val added = Prefs.toggleFav(this, u.toString())
+                        toast(if (added) "Added to Playlist" else "Removed from Playlist")
+                        if (tab == 3) showHome()
+                    }
+                    4 -> if (aud) toast("Only for videos") else Hooks.convert(this, listOf(u), listOf(v.name), null)
+                    5 -> {
+                        selected.clear()
+                        selected.add(u.toString())
+                        confirmDelete()
+                    }
+                    else -> {}
+                }
+            }
+            .show()
+    }
+
     // ================= select + delete =================
     private fun toggleSel(u: Uri?) {
         if (u == null) return
@@ -500,7 +566,7 @@ class MainActivity : Activity() {
             .setTitle("Delete?")
             .setMessage(selected.size.toString() + " file(s) will be deleted permanently.")
             .setPositiveButton("Delete") { _, _ -> doDelete() }
-            .setNegativeButton("Cancel", null)
+            .setNegativeButton("Cancel") { _, _ -> if (!selectMode) selected.clear() }
             .show()
     }
 
@@ -574,7 +640,7 @@ class MainActivity : Activity() {
         box.addView(badge, blp)
 
         val rowWidth = if (Prefs.gridView(this)) dp(140) else dp(130)
-        val rowHeight = if (Prefs.gridView(this)) dp(180) else dp(74)
+        val rowHeight = if (Prefs.gridView(this)) dp(180) else dp(84)
         row.addView(box, LinearLayout.LayoutParams(rowWidth, rowHeight))
 
         val col = LinearLayout(this)
@@ -586,10 +652,15 @@ class MainActivity : Activity() {
         title.ellipsize = TextUtils.TruncateAt.END
         val sub = TextView(this)
         sub.textSize = 12f
+        val info = TextView(this)
+        info.textSize = 11.5f
+        info.setTypeface(null, Typeface.BOLD)
+        info.visibility = View.GONE
         col.addView(title)
         col.addView(sub)
+        col.addView(info)
         row.addView(col, LinearLayout.LayoutParams(0, WC, 1f))
-        return Pair(row, H(check, thumb, badge, title, sub))
+        return Pair(row, H(check, thumb, badge, title, sub, info))
     }
 
     private fun makeAdapter(items: List<Item>, tc: Int, ac: Int): BaseAdapter = object : BaseAdapter() {
@@ -611,7 +682,6 @@ class MainActivity : Activity() {
             val item = items[position]
             val isFolder = item.tag.startsWith("F:")
             val u = item.uri
-            // last chala hua item highlight
             val isLast = !isFolder && u != null && u.toString() == Prefs.lastPlayedUri(this@MainActivity)
             v.setBackgroundColor(if (isLast) (ac and 0x00FFFFFF) or 0x33000000 else Color.TRANSPARENT)
             holder.title.text = (if (isLast) "\u25B6 " else "") + item.title
@@ -620,6 +690,20 @@ class MainActivity : Activity() {
             holder.sub.setTextColor((tc and 0x00FFFFFF) or 0x99000000.toInt())
             holder.badge.text = item.badge
             holder.badge.visibility = if (item.badge.isEmpty()) View.GONE else View.VISIBLE
+
+            // resolution (144p..4K) + FPS + HDR
+            if (item.res.isEmpty() || u == null) {
+                holder.info.visibility = View.GONE
+            } else {
+                val inf = VideoInfo.cached(u)
+                var s = item.res
+                if (inf != null && inf.fps > 0f) s += "  \u2022  " + VideoInfo.fpsLabel(inf.fps) + " fps"
+                if (inf != null && inf.hdr != "SDR") s += "  \u2022  " + inf.hdr
+                holder.info.text = s
+                holder.info.setTextColor(ac)
+                holder.info.visibility = View.VISIBLE
+                if (inf == null) VideoInfo.probeAsync(this@MainActivity, u) { ui.post { infoRefresh() } }
+            }
 
             holder.check.visibility = if (selectMode && !isFolder) View.VISIBLE else View.GONE
             holder.check.setTextColor(ac)
@@ -729,12 +813,11 @@ class MainActivity : Activity() {
             head.addView(sym("\uD83D\uDDD1", Color.parseColor("#FF5252")) { confirmDelete() })
         } else {
             selCountTv = null
-            val brand = TextView(this)
+            // "RajPlayer Pro" ka chalta-phirta RGB title
+            val brand = RgbTextView(this)
             brand.text = "\u26A1 RajPlayer Pro"
             brand.textSize = 22f
-            brand.setTextColor(ac)
             brand.setTypeface(null, Typeface.BOLD)
-            if (rgbAcc) rgbTargets.add { c -> brand.setTextColor(c) }
             head.addView(brand, LinearLayout.LayoutParams(0, WC, 1f))
             head.addView(sym("\uD83D\uDD0D", ic) {
                 searchOn = !searchOn
@@ -854,14 +937,14 @@ class MainActivity : Activity() {
             val keys = groups.keys.sortedBy { folderName(it).lowercase() }
             for (k in keys) {
                 val l = groups[k] ?: continue
-                items.add(Item(folderName(k), l.size.toString() + " videos", l[0].uri, l.size.toString(), "F:" + k))
+                items.add(Item(folderName(k), l.size.toString() + " videos", l[0].uri, l.size.toString(), "F:" + k, ""))
             }
         }
 
         if (items.isEmpty()) {
             val emptyMsg = when {
                 loading -> "Loading..."
-                tab == 3 -> "Playlist is empty. Long-press an item, tick it, then tap the star."
+                tab == 3 -> "Playlist is empty. Long-press an item and choose Add to Playlist."
                 else -> "No items found."
             }
             listHolder.addView(label(emptyMsg, 15f, tc))
@@ -893,13 +976,7 @@ class MainActivity : Activity() {
         lv.onItemLongClickListener = AdapterView.OnItemLongClickListener { _, _, i, _ ->
             val chosen = items[i]
             if (!chosen.tag.startsWith("F:") && chosen.uri != null) {
-                if (!selectMode) {
-                    selectMode = true
-                    selected.add(chosen.uri.toString())
-                    showHome()
-                } else {
-                    toggleSel(chosen.uri)
-                }
+                if (selectMode) toggleSel(chosen.uri) else rowMenu(chosen)
             }
             true
         }
@@ -1059,7 +1136,6 @@ class MainActivity : Activity() {
         // ---- video / playback ----
         root.addView(label("Video & Playback", 16f, tc))
         toggle(root, "Auto-rotate to match video", Prefs.autoOrient(this), ac) { Prefs.setAutoOrient(this, !Prefs.autoOrient(this)) }
-        toggle(root, "Mute audio above 4x speed", Prefs.muteFast(this), ac) { Prefs.setMuteFast(this, !Prefs.muteFast(this)) }
         toggle(root, "Background Audio", Prefs.bgAudio(this), ac) {
             Prefs.setBgAudio(this, !Prefs.bgAudio(this))
             Engine.bgAudio = Prefs.bgAudio(this)

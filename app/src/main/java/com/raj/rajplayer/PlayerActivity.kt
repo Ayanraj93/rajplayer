@@ -86,11 +86,10 @@ open class PlayerActivity : Activity() {
     private var lastFx = 0f
     private var lastFy = 0f
 
-    // speed
-    private val speeds = floatArrayOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 2.5f, 3f, 4f, 5f, 6f)
+    // speed: sirf 4x tak
+    private val speeds = floatArrayOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 2.5f, 3f, 3.5f, 4f)
     private var speedIdx = 2
-    private var mutedByFast = false
-    private var savedVol = 100
+    private var audioDelayMs = 0
 
     private val scales = listOf(
         MediaPlayer.ScaleType.SURFACE_BEST_FIT,
@@ -207,7 +206,6 @@ open class PlayerActivity : Activity() {
 
     private fun controlsVisible() = lockBtn.visibility == View.VISIBLE
 
-    // camera cutout ke neeche tak full screen, buttons cutout se bachte hain
     private fun setupCutout() {
         val lp = window.attributes
         lp.layoutInDisplayCutoutMode =
@@ -236,6 +234,37 @@ open class PlayerActivity : Activity() {
         root.requestApplyInsets()
     }
 
+    // ================= video surface (SurfaceView / TextureView for grading) =================
+    private fun attachVideo() {
+        try {
+            mp.detachViews()
+        } catch (e: Exception) {
+        }
+        mp.attachViews(layout, null, true, ColorGrade.on(this))
+        current = layout
+        layout.post { ColorGrade.apply(this, layout) }
+    }
+
+    private fun applyHdrWindow() {
+        if (Engine.items.isEmpty()) return
+        val inf = VideoInfo.cached(Engine.cur())
+        ColorGrade.hdrWindow(this, inf != null && inf.hdr != "SDR" && !ColorGrade.on(this))
+    }
+
+    private fun openGrade() {
+        val inf = if (Engine.items.isEmpty()) null else VideoInfo.cached(Engine.cur())
+        val hdr = inf?.hdr ?: "unknown"
+        val note = "This video: " + hdr + "   |   Screen HDR: " +
+                (if (ColorGrade.hdrSupported(this)) "supported" else "not supported") +
+                "\nGrading runs on a TextureView (SDR). Turn it OFF to use the native surface (HDR passthrough where the device allows)."
+        ColorGrade.dialog(this, note, {
+            attachVideo()
+            applyHdrWindow()
+        }, {
+            ColorGrade.apply(this, layout)
+        })
+    }
+
     // ================= zoom =================
     private fun applyZoom() {
         if (zoom <= 1f) {
@@ -260,7 +289,7 @@ open class PlayerActivity : Activity() {
         if (::layout.isInitialized) applyZoom()
     }
 
-    // ================= speed =================
+    // ================= speed / sync =================
     private fun applyRate() {
         val p = Engine.mp ?: return
         val r = speeds[speedIdx]
@@ -268,17 +297,25 @@ open class PlayerActivity : Activity() {
             p.setRate(r)
         } catch (e: Exception) {
         }
-        val mute = Prefs.muteFast(this) && r > 4f
-        if (mute && !mutedByFast) {
-            savedVol = p.getVolume()
-            p.setVolume(0)
-            mutedByFast = true
-        } else if (!mute && mutedByFast) {
-            p.setVolume(savedVol)
-            mutedByFast = false
+        try {
+            p.setAudioDelay(audioDelayMs * 1000L)
+        } catch (e: Exception) {
         }
         atomic?.setPaused(r > 2f)
         speedBtn.text = rateLabel(r)
+    }
+
+    private fun audioSyncDialog() {
+        val vals = intArrayOf(-500, -300, -200, -100, -50, 0, 50, 100, 200, 300, 500)
+        val names = vals.map { (if (it > 0) "+" else "") + it + " ms" + (if (it == 0) " (default)" else "") }.toTypedArray()
+        AlertDialog.Builder(this)
+            .setTitle("Audio sync (now " + audioDelayMs + " ms)")
+            .setItems(names) { _, i ->
+                audioDelayMs = vals[i]
+                applyRate()
+                showMsg("Audio delay " + audioDelayMs + " ms")
+            }
+            .show()
     }
 
     private fun seekBy(ms: Long) {
@@ -296,12 +333,15 @@ open class PlayerActivity : Activity() {
             finish()
             return
         }
+        val cu = Engine.cur()
         titleTv.text = Engine.title
         abA = -1L
         abB = -1L
-        Prefs.setLastPlayedUri(this, Engine.cur().toString())
-        if (Prefs.autoOrient(this)) Orient.setFor(this, Engine.cur()) { videoPortrait = it }
+        Prefs.setLastPlayedUri(this, cu.toString())
+        if (Prefs.autoOrient(this)) Orient.setFor(this, cu) { videoPortrait = it }
         resetZoom()
+        VideoInfo.probeAsync(this, cu) { runOnUiThread { applyHdrWindow() } }
+        applyHdrWindow()
         ui.removeCallbacks(rateRun)
         ui.postDelayed(rateRun, 500)
     }
@@ -319,6 +359,11 @@ open class PlayerActivity : Activity() {
             .show()
     }
 
+    private fun showInfo() {
+        if (Engine.items.isEmpty()) return
+        VideoInfo.show(this, Engine.cur(), Engine.title)
+    }
+
     private fun showMenu() {
         val abLabel = if (abA < 0) "A-B Repeat: set point A"
         else if (abB < 0) "A-B Repeat: set point B"
@@ -327,6 +372,9 @@ open class PlayerActivity : Activity() {
             "Equalizer Presets",
             "Audio Boost (up to 200%)",
             "Sleep Timer",
+            "Colour Grading / HDR",
+            "Audio Sync (delay)",
+            "Video Info",
             "Load External Subtitle",
             "Add Bookmark",
             "View Bookmarks",
@@ -335,7 +383,6 @@ open class PlayerActivity : Activity() {
             "Hardware Decoder: " + onOff(Prefs.hw(this)),
             "Picture-in-Picture",
             "Convert to Audio (MP3, M4A...)",
-            "Mute audio above 4x: " + onOff(Prefs.muteFast(this)),
             "Margin Animation: " + onOff(Prefs.videoMarginAnim(this)),
             "Auto-rotate to match video: " + onOff(Prefs.autoOrient(this)),
             "Allow Background (Battery)"
@@ -347,35 +394,33 @@ open class PlayerActivity : Activity() {
                     0 -> Dialogs.eq(this)
                     1 -> Dialogs.boost(this)
                     2 -> Dialogs.sleep(this)
-                    3 -> pickSub()
-                    4 -> addBookmark()
-                    5 -> bookmarksDialog()
-                    6 -> abStep()
-                    7 -> {
+                    3 -> openGrade()
+                    4 -> audioSyncDialog()
+                    5 -> showInfo()
+                    6 -> pickSub()
+                    7 -> addBookmark()
+                    8 -> bookmarksDialog()
+                    9 -> abStep()
+                    10 -> {
                         Engine.bgAudio = !Engine.bgAudio
                         Prefs.setBgAudio(this, Engine.bgAudio)
                         showMsg("Background audio " + onOff(Engine.bgAudio))
                     }
-                    8 -> {
+                    11 -> {
                         Prefs.setHw(this, !Prefs.hw(this))
                         Engine.loadAt(this, Engine.idx)
                         showMsg("HW decoder " + onOff(Prefs.hw(this)))
                     }
-                    9 -> enterPip()
-                    10 -> Hooks.convert(this, listOf(Engine.cur()), listOf(Engine.title), null)
-                    11 -> {
-                        Prefs.setMuteFast(this, !Prefs.muteFast(this))
-                        applyRate()
-                        showMsg("Mute above 4x " + onOff(Prefs.muteFast(this)))
-                    }
-                    12 -> toggleMargin()
-                    13 -> {
+                    12 -> enterPip()
+                    13 -> Hooks.convert(this, listOf(Engine.cur()), listOf(Engine.title), null)
+                    14 -> toggleMargin()
+                    15 -> {
                         Prefs.setAutoOrient(this, !Prefs.autoOrient(this))
                         if (Prefs.autoOrient(this)) Orient.setFor(this, Engine.cur()) { videoPortrait = it }
                         else requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                         showMsg("Auto-rotate " + onOff(Prefs.autoOrient(this)))
                     }
-                    14 -> Power.request(this)
+                    16 -> Power.request(this)
                     else -> {}
                 }
             }
@@ -555,7 +600,6 @@ open class PlayerActivity : Activity() {
 
             override fun onScroll(e1: MotionEvent?, e2: MotionEvent, dx: Float, dy: Float): Boolean {
                 if (locked || e1 == null || zooming) return false
-                // zoom ke baad ek ungli = sirf pan (seek / volume / brightness nahi)
                 if (zoom > 1.02f) {
                     tx -= dx
                     ty -= dy
@@ -603,7 +647,6 @@ open class PlayerActivity : Activity() {
             val act = ev.actionMasked
             if (act == MotionEvent.ACTION_DOWN) zooming = false
             if (!zooming && ev.pointerCount > 1) {
-                // do ungli: chalu single-finger gesture band, seek lagne ka sawaal hi nahi
                 zooming = true
                 gMode = 0
                 val cancel = MotionEvent.obtain(ev)
@@ -651,7 +694,6 @@ open class PlayerActivity : Activity() {
         Engine.bgAudio = Prefs.bgAudio(this)
         slop = ViewConfiguration.get(this).scaledTouchSlop
 
-        // orientation: video ki asli shape ke hisaab se (bina flip), ya system ke hisaab se
         if (Prefs.autoOrient(this)) {
             if (firstUri != null) {
                 val k = Orient.kindSync(this, firstUri)
@@ -674,7 +716,6 @@ open class PlayerActivity : Activity() {
         root = FrameLayout(this)
         root.setBackgroundColor(Color.BLACK)
 
-        // margin animation: video ke peeche, sirf black margins me dikhti hai
         if (Prefs.videoMarginAnim(this) && Prefs.themeMode(this) != "none") {
             val av = AtomicView(this, true)
             atomic = av
@@ -699,7 +740,7 @@ open class PlayerActivity : Activity() {
         msgTv.visibility = View.GONE
         root.addView(msgTv, FrameLayout.LayoutParams(WC, WC, Gravity.CENTER))
 
-        // ---- top bar (video title bar) ----
+        // ---- top bar: back | title | info | rotate ----
         topBar = LinearLayout(this)
         topBar.gravity = Gravity.CENTER_VERTICAL
         topBar.setBackgroundColor(Prefs.videoBarColor(this))
@@ -711,6 +752,10 @@ open class PlayerActivity : Activity() {
         titleTv.maxLines = 1
         titleTv.ellipsize = TextUtils.TruncateAt.END
         topBar.addView(titleTv, LinearLayout.LayoutParams(0, WC, 1f))
+        topBar.addView(ib("\u2139\uFE0F", 20f) {
+            showInfo()
+            showControls()
+        })
         topBar.addView(ib("\uD83D\uDD04", 20f) {
             requestedOrientation =
                 if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
@@ -870,13 +915,7 @@ open class PlayerActivity : Activity() {
         setContentView(root)
         padForCutout()
 
-        // player Engine ka hai, yahan sirf screen jodte hain
-        try {
-            mp.detachViews()
-        } catch (e: Exception) {
-        }
-        mp.attachViews(layout, null, true, false)
-        current = layout
+        attachVideo()
         Engine.listener = lis
         setupTouch()
 
@@ -905,7 +944,6 @@ open class PlayerActivity : Activity() {
         }
     }
 
-    // background me sirf awaaz (tasveer band): battery bachti hai
     private fun audioOnly() {
         val p = Engine.mp ?: return
         if (Engine.items.isEmpty()) return
@@ -942,6 +980,7 @@ open class PlayerActivity : Activity() {
             }
             current = null
         }
+        ColorGrade.hdrWindow(this, false)
         if (!Engine.bgAudio && Engine.listener == null) {
             Engine.stopAll(this)
         } else if (Engine.bgAudio && Engine.active && Engine.isPlaying()) {
