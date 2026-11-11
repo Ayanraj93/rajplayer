@@ -64,7 +64,7 @@ class SpeedRulerView(ctx: Context) : View(ctx) {
         mark.style = Paint.Style.FILL
     }
 
-    fun setValue(v: Float) {
+    fun jumpTo(v: Float) {
         val c = v.coerceIn(minV, maxV)
         raw = c
         value = c
@@ -128,7 +128,7 @@ object SpeedPanel {
 
         val ruler = SpeedRulerView(a)
         ruler.accent = accent
-        ruler.setValue(cur)
+        ruler.jumpTo(cur)
         ruler.onChange = { v ->
             valTv.text = lbl(v)
             onRate(v)
@@ -141,7 +141,7 @@ object SpeedPanel {
             val b = Button(a)
             b.text = lbl(p)
             b.setOnClickListener {
-                ruler.setValue(p)
+                ruler.jumpTo(p)
                 valTv.text = lbl(p)
                 onRate(p)
             }
