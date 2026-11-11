@@ -111,6 +111,7 @@ class MainActivity : Activity() {
         frame = FrameLayout(this)
         setContentView(frame)
         Engine.bgAudio = Prefs.bgAudio(this)
+        ui.postDelayed({ Engine.ensure(applicationContext) }, 400)
         if (handleIncoming(intent)) finish()
     }
 

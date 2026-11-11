@@ -15,6 +15,7 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.text.TextUtils
 import android.util.Rational
 import android.view.GestureDetector
@@ -31,6 +32,7 @@ import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
 import java.io.File
+import java.util.Locale
 import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.util.VLCVideoLayout
 
@@ -86,10 +88,11 @@ open class PlayerActivity : Activity() {
     private var lastFx = 0f
     private var lastFy = 0f
 
-    // speed: sirf 4x tak
-    private val speeds = floatArrayOf(0.5f, 0.75f, 1f, 1.25f, 1.5f, 2f, 2.5f, 3f, 3.5f, 4f)
-    private var speedIdx = 2
+    // speed: 0.25x .. 4x (ruler) + smart auto-fix
+    private var rate = 1f
     private var audioDelayMs = 0
+    private val guard = SpeedGuard()
+    private var decoderSwitched = false
 
     private val scales = listOf(
         MediaPlayer.ScaleType.SURFACE_BEST_FIT,
@@ -125,11 +128,15 @@ open class PlayerActivity : Activity() {
                     }
                     durTv.text = fmt(len)
                 }
-                if (abA >= 0 && abB > abA && t >= abB) p.setTime(abA)
+                if (abA >= 0 && abB > abA && t >= abB) seekTo(abA)
                 if (!userSeeking) curTv.text = fmt(t)
                 playBtn.text = if (p.isPlaying) "\u23F8" else "\u25B6"
+                if (Tuning.autoFix(this@PlayerActivity)) {
+                    val act = guard.sample(SystemClock.elapsedRealtime(), t, p.isPlaying && !userSeeking, rate)
+                    if (act != 0) handleGuard(act)
+                }
             }
-            ui.postDelayed(this, if (speeds[speedIdx] > 2f) 800L else 500L)
+            ui.postDelayed(this, if (rate > 2f) 800L else 500L)
         }
     }
 
@@ -137,7 +144,9 @@ open class PlayerActivity : Activity() {
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
     private fun contrast(c: Int) = if (Color.luminance(c) > 0.5f) Color.BLACK else Color.WHITE
     private fun onOff(b: Boolean) = if (b) "ON" else "OFF"
-    private fun rateLabel(r: Float) = (if (r % 1f == 0f) r.toInt().toString() else r.toString()) + "x"
+
+    private fun rateLabel(r: Float): String =
+        String.format(Locale.US, "%.2f", r).trimEnd('0').trimEnd('.') + "x"
 
     private fun fmt(ms: Long): String {
         val s = if (ms < 0) 0L else ms / 1000
@@ -289,20 +298,82 @@ open class PlayerActivity : Activity() {
         if (::layout.isInitialized) applyZoom()
     }
 
-    // ================= speed / sync =================
+    // ================= speed / sync / auto-fix =================
     private fun applyRate() {
         val p = Engine.mp ?: return
-        val r = speeds[speedIdx]
         try {
-            p.setRate(r)
+            p.setRate(rate)
         } catch (e: Exception) {
         }
         try {
             p.setAudioDelay(audioDelayMs * 1000L)
         } catch (e: Exception) {
         }
-        atomic?.setPaused(r > 2f)
-        speedBtn.text = rateLabel(r)
+        atomic?.setPaused(rate > 2f)
+        speedBtn.text = rateLabel(rate)
+        guard.reset()
+    }
+
+    private fun setRateTo(r: Float) {
+        rate = Math.round(r.coerceIn(0.25f, 4f) * 20f) / 20f
+        applyRate()
+    }
+
+    private fun openSpeed() {
+        ui.removeCallbacks(hideRun)
+        SpeedPanel.show(this, rate, Prefs.accent(this), { r -> setRateTo(r) }, { decoderDialog() })
+    }
+
+    private fun seekTo(ms: Long) {
+        guard.reset()
+        mp.setTime(ms)
+    }
+
+    private fun handleGuard(act: Int) {
+        when (act) {
+            1 -> {
+                seekTo(mp.getTime())
+                showMsg("Auto-fix: re-syncing")
+            }
+            2 -> {
+                setRateTo(Math.max(1f, rate - 0.5f))
+                showMsg("Auto-fix: speed " + rateLabel(rate) + " for smooth playback")
+            }
+            3 -> switchDecoder()
+            else -> {}
+        }
+    }
+
+    // lag par decoder badlo (HW <-> SW), sirf ek baar har video par
+    private fun switchDecoder() {
+        if (Engine.items.isEmpty() || decoderSwitched) return
+        decoderSwitched = true
+        val key = Engine.cur().toString()
+        val toSw = !Tuning.isSw(key) && Tuning.decMode(this) != "sw"
+        if (toSw) Tuning.forceSw(key) else Tuning.forceHw(key)
+        showMsg("Auto-fix: switching to " + (if (toSw) "SW" else "HW") + " decoder")
+        Engine.loadAt(this, Engine.idx)
+    }
+
+    private fun decoderDialog() {
+        val modes = arrayOf("auto", "hw", "hwplus", "sw")
+        val names = arrayOf(
+            "Auto (HW, falls back to SW)",
+            "HW decoder",
+            "HW+ decoder (forced hardware)",
+            "SW decoder (software)"
+        )
+        val cur = modes.indexOf(Tuning.decMode(this))
+        AlertDialog.Builder(this)
+            .setTitle("Decoder")
+            .setSingleChoiceItems(names, cur) { dlg, i ->
+                Tuning.setDecMode(this, modes[i])
+                Tuning.clearOverrides()
+                dlg.dismiss()
+                if (Engine.items.isNotEmpty()) Engine.loadAt(this, Engine.idx)
+                showMsg("Decoder: " + names[i])
+            }
+            .show()
     }
 
     private fun audioSyncDialog() {
@@ -319,7 +390,7 @@ open class PlayerActivity : Activity() {
     }
 
     private fun seekBy(ms: Long) {
-        mp.setTime(Math.max(0L, mp.getTime() + ms))
+        seekTo(Math.max(0L, mp.getTime() + ms))
         showMsg(if (ms > 0) "+" + (ms / 1000) + "s" else "" + (ms / 1000) + "s")
     }
 
@@ -337,6 +408,8 @@ open class PlayerActivity : Activity() {
         titleTv.text = Engine.title
         abA = -1L
         abB = -1L
+        guard.newItem()
+        decoderSwitched = false
         Prefs.setLastPlayedUri(this, cu.toString())
         if (Prefs.autoOrient(this)) Orient.setFor(this, cu) { videoPortrait = it }
         resetZoom()
@@ -369,6 +442,9 @@ open class PlayerActivity : Activity() {
         else if (abB < 0) "A-B Repeat: set point B"
         else "A-B Repeat: clear"
         val opts = arrayOf(
+            "Speed (ruler)  " + rateLabel(rate),
+            "Decoder: " + Tuning.decLabel(Tuning.decMode(this)),
+            "Smart auto-fix: " + onOff(Tuning.autoFix(this)),
             "Equalizer Presets",
             "Audio Boost (up to 200%)",
             "Sleep Timer",
@@ -380,7 +456,6 @@ open class PlayerActivity : Activity() {
             "View Bookmarks",
             abLabel,
             "Background Audio: " + onOff(Engine.bgAudio),
-            "Hardware Decoder: " + onOff(Prefs.hw(this)),
             "Picture-in-Picture",
             "Convert to Audio (MP3, M4A...)",
             "Margin Animation: " + onOff(Prefs.videoMarginAnim(this)),
@@ -391,36 +466,38 @@ open class PlayerActivity : Activity() {
             .setTitle("Options")
             .setItems(opts) { _, i ->
                 when (i) {
-                    0 -> Dialogs.eq(this)
-                    1 -> Dialogs.boost(this)
-                    2 -> Dialogs.sleep(this)
-                    3 -> openGrade()
-                    4 -> audioSyncDialog()
-                    5 -> showInfo()
-                    6 -> pickSub()
-                    7 -> addBookmark()
-                    8 -> bookmarksDialog()
-                    9 -> abStep()
-                    10 -> {
+                    0 -> openSpeed()
+                    1 -> decoderDialog()
+                    2 -> {
+                        Tuning.setAutoFix(this, !Tuning.autoFix(this))
+                        guard.newItem()
+                        showMsg("Smart auto-fix " + onOff(Tuning.autoFix(this)))
+                    }
+                    3 -> Dialogs.eq(this)
+                    4 -> Dialogs.boost(this)
+                    5 -> Dialogs.sleep(this)
+                    6 -> openGrade()
+                    7 -> audioSyncDialog()
+                    8 -> showInfo()
+                    9 -> pickSub()
+                    10 -> addBookmark()
+                    11 -> bookmarksDialog()
+                    12 -> abStep()
+                    13 -> {
                         Engine.bgAudio = !Engine.bgAudio
                         Prefs.setBgAudio(this, Engine.bgAudio)
                         showMsg("Background audio " + onOff(Engine.bgAudio))
                     }
-                    11 -> {
-                        Prefs.setHw(this, !Prefs.hw(this))
-                        Engine.loadAt(this, Engine.idx)
-                        showMsg("HW decoder " + onOff(Prefs.hw(this)))
-                    }
-                    12 -> enterPip()
-                    13 -> Hooks.convert(this, listOf(Engine.cur()), listOf(Engine.title), null)
-                    14 -> toggleMargin()
-                    15 -> {
+                    14 -> enterPip()
+                    15 -> Hooks.convert(this, listOf(Engine.cur()), listOf(Engine.title), null)
+                    16 -> toggleMargin()
+                    17 -> {
                         Prefs.setAutoOrient(this, !Prefs.autoOrient(this))
                         if (Prefs.autoOrient(this)) Orient.setFor(this, Engine.cur()) { videoPortrait = it }
                         else requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
                         showMsg("Auto-rotate " + onOff(Prefs.autoOrient(this)))
                     }
-                    16 -> Power.request(this)
+                    18 -> Power.request(this)
                     else -> {}
                 }
             }
@@ -485,7 +562,7 @@ open class PlayerActivity : Activity() {
         AlertDialog.Builder(this)
             .setTitle("Bookmarks")
             .setItems(names) { _, i ->
-                mp.setTime(l[i])
+                seekTo(l[i])
                 showControls()
             }
             .setNeutralButton("Clear All") { _, _ -> Prefs.setBms(this, key, emptyList()) }
@@ -544,7 +621,7 @@ open class PlayerActivity : Activity() {
 
     // ================= touch: gestures + isolated zoom =================
     private fun endGesture() {
-        if (gMode == 3) mp.setTime(seekTarget)
+        if (gMode == 3) seekTo(seekTarget)
         gMode = 0
         ui.removeCallbacks(hideMsg)
         ui.postDelayed(hideMsg, 600)
@@ -795,7 +872,7 @@ open class PlayerActivity : Activity() {
             }
 
             override fun onStopTrackingTouch(s: SeekBar?) {
-                mp.setTime((s?.progress ?: 0).toLong())
+                seekTo((s?.progress ?: 0).toLong())
                 userSeeking = false
                 showControls()
             }
@@ -836,15 +913,9 @@ open class PlayerActivity : Activity() {
 
         val exRow = LinearLayout(this)
         exRow.gravity = Gravity.CENTER
-        speedBtn = ib("1x", 14f) {
-            speedIdx = (speedIdx + 1) % speeds.size
-            applyRate()
-            showMsg("Speed " + rateLabel(speeds[speedIdx]))
-            showControls()
-        }
+        speedBtn = ib("1x", 14f) { openSpeed() }
         speedBtn.setOnLongClickListener {
-            speedIdx = 2
-            applyRate()
+            setRateTo(1f)
             showMsg("Speed 1x")
             true
         }

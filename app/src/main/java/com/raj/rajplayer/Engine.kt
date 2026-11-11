@@ -97,7 +97,7 @@ object Engine {
         app = ctx.applicationContext
         val existing = mp
         if (existing != null) return existing
-        val v = LibVLC(app)
+        val v = LibVLC(app, Tuning.options())
         val p = MediaPlayer(v)
         p.setEventListener { ev ->
             val t = ev.type
@@ -214,7 +214,11 @@ object Engine {
                 pfd = null
                 media = Media(vlc!!, uri)
             }
-            media.setHWDecoderEnabled(!forceSoft && Prefs.hw(app), false)
+            Tuning.applyDecoder(media, app, uri.toString())
+            if (pendingSeek > 0) {
+                media.addOption(":start-time=" + (pendingSeek / 1000.0))
+                pendingSeek = 0
+            }
             p.setMedia(media)
             media.release()
             resumeOnFocus = false
