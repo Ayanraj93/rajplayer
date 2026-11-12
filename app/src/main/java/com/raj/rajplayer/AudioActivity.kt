@@ -268,6 +268,20 @@ class AudioActivity : Activity() {
         tr.addView(repBtn)
         col.addView(tr, LinearLayout.LayoutParams(MP, WC))
 
+        // Audio seek step uses the same configurable interval as video.
+        val audioSeekRow = LinearLayout(this)
+        audioSeekRow.gravity = Gravity.CENTER
+        audioSeekRow.setPadding(0, dp(4), 0, dp(4))
+        audioSeekRow.addView(ib("-" + Prefs.seekSec(this) + "s", 14f, ic) {
+            val now = Engine.mp?.time ?: 0L
+            Engine.seekTo((now - Prefs.seekSec(this) * 1000L).coerceAtLeast(0L))
+        })
+        audioSeekRow.addView(ib("+" + Prefs.seekSec(this) + "s", 14f, ic) {
+            val now = Engine.mp?.time ?: 0L
+            Engine.seekTo(now + Prefs.seekSec(this) * 1000L)
+        })
+        col.addView(audioSeekRow, LinearLayout.LayoutParams(MP, WC))
+
         // ---- extras ----
         val ex = LinearLayout(this)
         ex.gravity = Gravity.CENTER

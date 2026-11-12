@@ -134,8 +134,8 @@ object Prefs {
     fun hw(c: Context): Boolean = p(c).getBoolean("hw", true)
     fun setHw(c: Context, v: Boolean) { p(c).edit().putBoolean("hw", v).apply() }
 
-    fun seekSec(c: Context): Int = p(c).getInt("seek_sec", 10)
-    fun setSeekSec(c: Context, v: Int) { p(c).edit().putInt("seek_sec", v).apply() }
+    fun seekSec(c: Context): Int = p(c).getInt("seek_sec", 10).coerceIn(10, 240)
+    fun setSeekSec(c: Context, v: Int) { p(c).edit().putInt("seek_sec", v.coerceIn(10, 240)).apply() }
 
     fun sortMode(c: Context): Int = p(c).getInt("sort_mode", 0)
     fun setSortMode(c: Context, v: Int) { p(c).edit().putInt("sort_mode", v).apply() }

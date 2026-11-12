@@ -15,8 +15,8 @@ android {
         applicationId = "com.raj.rajplayer"
         minSdk = 29
         targetSdk = 34
-        versionCode = 16
-        versionName = "1.2"
+        versionCode = 17
+        versionName = "1.3"
         ndk { abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a")) }
     }
 
@@ -38,4 +38,5 @@ android {
 
 dependencies {
     implementation("org.videolan.android:libvlc-all:3.6.0")
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
 }

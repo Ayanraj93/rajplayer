@@ -21,6 +21,7 @@ import android.provider.MediaStore
 import android.text.Editable
 import android.text.TextUtils
 import android.text.TextWatcher
+import android.text.InputType
 import android.util.LruCache
 import android.util.Size
 import android.view.Gravity
@@ -39,7 +40,9 @@ import android.widget.ScrollView
 import android.widget.SeekBar
 import android.widget.TextView
 import android.widget.Toast
+import androidx.swiperefreshlayout.widget.SwipeRefreshLayout
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 class MainActivity : Activity() {
 
@@ -61,6 +64,8 @@ class MainActivity : Activity() {
     private var settingsSv: ScrollView? = null
     private var settingsY = 0
     private var infoPosted = false
+    private var swipeRefresh: SwipeRefreshLayout? = null
+    private val mediaLoadRunning = AtomicBoolean(false)
 
     @Volatile private var videos: List<V> = emptyList()
     @Volatile private var audios: List<V> = emptyList()
@@ -372,21 +377,30 @@ class MainActivity : Activity() {
         )
         val sel = if (video) null else MediaStore.Audio.Media.IS_MUSIC + " != 0"
         val out = ArrayList<V>()
-        try {
-            contentResolver.query(base, proj, sel, null, null)?.use { c ->
-                while (c.moveToNext()) {
-                    val w = if (video) c.getInt(6) else 0
-                    val h = if (video) c.getInt(7) else 0
-                    out.add(
-                        V(
-                            c.getString(1) ?: "media",
-                            ContentUris.withAppendedId(base, c.getLong(0)),
-                            c.getLong(2), c.getLong(3), c.getString(4) ?: "", c.getLong(5), w, h
-                        )
+        contentResolver.query(base, proj, sel, null, null)?.use { c ->
+            val idCol = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+            val nameCol = c.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+            val durationCol = c.getColumnIndex(MediaStore.MediaColumns.DURATION)
+            val sizeCol = c.getColumnIndex(MediaStore.MediaColumns.SIZE)
+            val pathCol = c.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+            val dateCol = c.getColumnIndex(MediaStore.MediaColumns.DATE_ADDED)
+            val widthCol = if (video) c.getColumnIndex(MediaStore.MediaColumns.WIDTH) else -1
+            val heightCol = if (video) c.getColumnIndex(MediaStore.MediaColumns.HEIGHT) else -1
+            while (c.moveToNext()) {
+                val w = if (widthCol >= 0) c.getInt(widthCol) else 0
+                val h = if (heightCol >= 0) c.getInt(heightCol) else 0
+                out.add(
+                    V(
+                        if (nameCol >= 0) c.getString(nameCol) ?: "media" else "media",
+                        ContentUris.withAppendedId(base, c.getLong(idCol)),
+                        if (durationCol >= 0) c.getLong(durationCol) else 0L,
+                        if (sizeCol >= 0) c.getLong(sizeCol) else 0L,
+                        if (pathCol >= 0) c.getString(pathCol) ?: "" else "",
+                        if (dateCol >= 0) c.getLong(dateCol) else 0L,
+                        w, h
                     )
-                }
+                )
             }
-        } catch (e: Exception) {
         }
         return sortList(out)
     }
@@ -403,16 +417,45 @@ class MainActivity : Activity() {
     }
 
     private fun reloadMedia() {
-        if (!hasPerm()) return
+        if (!hasPerm()) {
+            swipeRefresh?.isRefreshing = false
+            return
+        }
+        if (!mediaLoadRunning.compareAndSet(false, true)) return
         loading = true
+        swipeRefresh?.isRefreshing = true
         loader.execute {
-            videos = queryMedia(true)
-            audios = queryMedia(false)
-            loading = false
+            var error: Exception? = null
+            try {
+                // Read both collections off the UI thread. Publish only after both queries finish,
+                // so a temporary provider error never replaces a populated list with an empty one.
+                val freshVideos = queryMedia(true)
+                val freshAudios = queryMedia(false)
+                videos = freshVideos
+                audios = freshAudios
+            } catch (e: Exception) {
+                error = e
+            } finally {
+                loading = false
+                mediaLoadRunning.set(false)
+            }
             runOnUiThread {
-                if (!isFinishing && !inSettings && ::listHolder.isInitialized) renderList()
+                swipeRefresh?.isRefreshing = false
+                if (!isFinishing && !inSettings && ::listHolder.isInitialized) {
+                    renderList()
+                    if (error != null) toast("Media list refresh failed. Please check permission and try again.")
+                }
             }
         }
+    }
+
+    private fun refreshContainer(content: View, accent: Int): SwipeRefreshLayout {
+        val swipe = SwipeRefreshLayout(this)
+        swipe.setColorSchemeColors(accent, Theme.rgbNow(120f), Theme.rgbNow(240f))
+        swipe.setOnRefreshListener { reloadMedia() }
+        swipe.addView(content, ViewGroup.LayoutParams(MP, MP))
+        swipeRefresh = swipe
+        return swipe
     }
 
     // ================= play =================
@@ -948,7 +991,11 @@ class MainActivity : Activity() {
                 tab == 3 -> "Playlist is empty. Long-press an item and choose Add to Playlist."
                 else -> "No items found."
             }
-            listHolder.addView(label(emptyMsg, 15f, tc))
+            val empty = FrameLayout(this)
+            val emptyLabel = label(emptyMsg, 15f, tc)
+            emptyLabel.gravity = Gravity.CENTER
+            empty.addView(emptyLabel, FrameLayout.LayoutParams(MP, MP))
+            listHolder.addView(refreshContainer(empty, ac), FrameLayout.LayoutParams(MP, MP))
             return
         }
 
@@ -982,7 +1029,7 @@ class MainActivity : Activity() {
             true
         }
         col.addView(lv, LinearLayout.LayoutParams(MP, 0, 1f))
-        listHolder.addView(col, FrameLayout.LayoutParams(MP, MP))
+        listHolder.addView(refreshContainer(col, ac), FrameLayout.LayoutParams(MP, MP))
     }
 
     // ================= Settings =================
@@ -1144,14 +1191,36 @@ class MainActivity : Activity() {
         root.addView(button("Background Activity (Battery): " + (if (Power.isIgnoring(this)) "ALLOWED \u2705" else "Tap to allow"), ac) {
             Power.request(this)
         })
-        val seekSecs = intArrayOf(5, 10, 15, 20, 30)
-        val seekNames = arrayOf("5 seconds", "10 seconds", "15 seconds", "20 seconds", "30 seconds")
-        root.addView(button("Double-tap Seek: " + Prefs.seekSec(this) + "s", ac) {
+        val seekSecs = intArrayOf(10, 20, 30, 40, 60)
+        val seekNames = arrayOf("10 seconds", "20 seconds", "30 seconds", "40 seconds", "1 minute", "Custom (up to 4 minutes)")
+        root.addView(button("Seek interval (Audio + Video): " + Prefs.seekSec(this) + "s", ac) {
             AlertDialog.Builder(this)
-                .setTitle("Seek duration")
+                .setTitle("Seek forward / backward")
                 .setItems(seekNames) { _, i ->
-                    Prefs.setSeekSec(this, seekSecs[i])
-                    refreshSettings()
+                    if (i < seekSecs.size) {
+                        Prefs.setSeekSec(this, seekSecs[i])
+                        refreshSettings()
+                    } else {
+                        val input = EditText(this)
+                        input.inputType = InputType.TYPE_CLASS_NUMBER
+                        input.hint = "Seconds (10–240)"
+                        input.setText(Prefs.seekSec(this).toString())
+                        AlertDialog.Builder(this)
+                            .setTitle("Custom seek interval")
+                            .setMessage("Enter seconds. Maximum 240 seconds (4 minutes). Applies to audio and video.")
+                            .setView(input)
+                            .setNegativeButton("Cancel", null)
+                            .setPositiveButton("Save") { _, _ ->
+                                val value = input.text.toString().toIntOrNull()
+                                if (value == null || value !in 10..240) {
+                                    toast("Enter a value between 10 and 240 seconds")
+                                } else {
+                                    Prefs.setSeekSec(this, value)
+                                    refreshSettings()
+                                }
+                            }
+                            .show()
+                    }
                 }
                 .show()
         })
