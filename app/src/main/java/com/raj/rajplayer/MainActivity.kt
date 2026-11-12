@@ -971,7 +971,9 @@ class MainActivity : Activity() {
             shown = videos.filter { favSet.contains(it.uri.toString()) } + audios.filter { favSet.contains(it.uri.toString()) }
             for (v in shown) items.add(itemOf(v, "\u2B50"))
         } else if (tab == 2) {
-            shown = audios
+            val minDuration = Prefs.audioMinDurationMs(this)
+            shown = if (minDuration <= 0L) audios
+                    else audios.filter { it.dur >= minDuration }
             for (v in shown) items.add(itemOf(v, "\uD83C\uDFB5"))
         } else if (tab == 0 || of != null) {
             shown = if (of != null) videos.filter { it.folder == of } else videos
@@ -1224,6 +1226,68 @@ class MainActivity : Activity() {
                 }
                 .show()
         })
+
+        // ---- audio list duration filter ----
+        root.addView(label("Audio List", 16f, tc))
+
+        val durationOptions = arrayOf(
+            "All", "5 seconds", "10 seconds", "20 seconds",
+            "30 seconds", "40 seconds", "50 seconds",
+            "1 minute", "2 minutes", "3 minutes",
+            "Custom duration..."
+        )
+
+        val durationValues = longArrayOf(
+            0L, 5000L, 10000L, 20000L, 30000L,
+            40000L, 50000L, 60000L, 120000L, 180000L
+        )
+
+        val currentDuration = Prefs.audioMinDurationMs(this)
+        val currentLabel = if (currentDuration == 0L) "All" else durStr(currentDuration)
+
+        root.addView(button("Minimum audio duration: " + currentLabel, ac) {
+            AlertDialog.Builder(this)
+                .setTitle("Minimum Audio Duration")
+                .setItems(durationOptions) { _, which ->
+                    if (which < durationValues.size) {
+                        Prefs.setAudioMinDurationMs(this, durationValues[which])
+                        dirty = true
+                        refreshSettings()
+                    } else {
+                        val input = EditText(this)
+                        input.inputType = InputType.TYPE_CLASS_NUMBER
+                        input.hint = "Seconds (1-86400)"
+                        input.setText(
+                            if (currentDuration > 0L)
+                                (currentDuration / 1000L).toString()
+                            else ""
+                        )
+
+                        AlertDialog.Builder(this)
+                            .setTitle("Custom Minimum Duration")
+                            .setMessage("Enter minimum duration in seconds (1 to 86400).")
+                            .setView(input)
+                            .setNegativeButton("Cancel", null)
+                            .setPositiveButton("Save") { _, _ ->
+                                val seconds = input.text.toString().toLongOrNull()
+                                if (seconds == null || seconds !in 1L..86400L) {
+                                    toast("Enter a value between 1 and 86400 seconds")
+                                } else {
+                                    Prefs.setAudioMinDurationMs(this, seconds * 1000L)
+                                    dirty = true
+                                    refreshSettings()
+                                }
+                            }
+                            .show()
+                    }
+                }
+                .show()
+        })
+
+        root.addView(label(
+            "Hides audio files shorter than the selected duration from the Music tab only. Video list and Playlist remain unchanged.",
+            12f, tc
+        ))
 
         // ---- colours ----
         root.addView(label("Colours (palette or custom hex)", 16f, tc))

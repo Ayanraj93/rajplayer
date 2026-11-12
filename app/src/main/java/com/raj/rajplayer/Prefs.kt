@@ -137,6 +137,14 @@ object Prefs {
     fun seekSec(c: Context): Int = p(c).getInt("seek_sec", 10).coerceIn(10, 240)
     fun setSeekSec(c: Context, v: Int) { p(c).edit().putInt("seek_sec", v.coerceIn(10, 240)).apply() }
 
+    // Minimum audio duration filter (Music tab only)
+    fun audioMinDurationMs(c: Context): Long =
+        p(c).getLong("audio_min_duration_ms", 0L).coerceIn(0L, 86400000L)
+
+    fun setAudioMinDurationMs(c: Context, v: Long) {
+        p(c).edit().putLong("audio_min_duration_ms", v.coerceIn(0L, 86400000L)).apply()
+    }
+
     fun sortMode(c: Context): Int = p(c).getInt("sort_mode", 0)
     fun setSortMode(c: Context, v: Int) { p(c).edit().putInt("sort_mode", v).apply() }
 
