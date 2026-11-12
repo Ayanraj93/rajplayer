@@ -9,15 +9,14 @@ android {
         checkReleaseBuilds = false
     }
     namespace = "com.raj.rajplayer"
-    compileSdk = 34
+    compileSdk = 36
 
     defaultConfig {
         applicationId = "com.raj.rajplayer"
         minSdk = 29
-        targetSdk = 34
-        versionCode = 16
-        versionName = "1.2"
-        ndk { abiFilters.addAll(listOf("arm64-v8a", "armeabi-v7a")) }
+        targetSdk = 35
+        versionCode = 18
+        versionName = "1.4-media3"
     }
 
     signingConfigs {
@@ -37,5 +36,11 @@ android {
 }
 
 dependencies {
-    implementation("org.videolan.android:libvlc-all:3.6.0")
+    val media3Version = "1.11.1"
+    implementation("androidx.media3:media3-exoplayer:$media3Version")
+    implementation("androidx.media3:media3-common:$media3Version")
+    implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
+    implementation("androidx.media3:media3-exoplayer-dash:$media3Version")
+    implementation("androidx.media3:media3-exoplayer-rtsp:$media3Version")
+    implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
 }

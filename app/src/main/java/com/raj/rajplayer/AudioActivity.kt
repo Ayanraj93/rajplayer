@@ -45,8 +45,8 @@ class AudioActivity : Activity() {
     private val pool = Executors.newSingleThreadExecutor()
     private var userSeeking = false
     private var artKey = ""
-    private val speeds = floatArrayOf(0.75f, 1f, 1.25f, 1.5f, 2f)
-    private var speedIdx = 1
+    private val speeds = floatArrayOf(1f, 1.5f, 2f, 3f, 4f)
+    private var speedIdx = 4
     private val rgbTargets = ArrayList<(Int) -> Unit>()
 
     private val lis = object : Engine.Listener {
@@ -268,11 +268,25 @@ class AudioActivity : Activity() {
         tr.addView(repBtn)
         col.addView(tr, LinearLayout.LayoutParams(MP, WC))
 
+        // Audio seek step uses the same configurable interval as video.
+        val audioSeekRow = LinearLayout(this)
+        audioSeekRow.gravity = Gravity.CENTER
+        audioSeekRow.setPadding(0, dp(4), 0, dp(4))
+        audioSeekRow.addView(ib("-" + Prefs.seekSec(this) + "s", 14f, ic) {
+            val now = Engine.mp?.time ?: 0L
+            Engine.seekTo((now - Prefs.seekSec(this) * 1000L).coerceAtLeast(0L))
+        })
+        audioSeekRow.addView(ib("+" + Prefs.seekSec(this) + "s", 14f, ic) {
+            val now = Engine.mp?.time ?: 0L
+            Engine.seekTo(now + Prefs.seekSec(this) * 1000L)
+        })
+        col.addView(audioSeekRow, LinearLayout.LayoutParams(MP, WC))
+
         // ---- extras ----
         val ex = LinearLayout(this)
         ex.gravity = Gravity.CENTER
         ex.setPadding(0, dp(12), 0, 0)
-        ex.addView(ib("1x", 14f, ic) { b ->
+        ex.addView(ib("4x", 14f, ic) { b ->
             speedIdx = (speedIdx + 1) % speeds.size
             Engine.mp?.setRate(speeds[speedIdx])
             b.text = speeds[speedIdx].toString() + "x"
@@ -317,6 +331,7 @@ class AudioActivity : Activity() {
         }
         Prefs.setLastPlayedUri(this, Engine.cur().toString())
         titleTv.text = Engine.title
+        Engine.mp?.setRate(speeds[speedIdx])
         subTv.text = (Engine.idx + 1).toString() + " / " + Engine.items.size
         loadArt()
         update()

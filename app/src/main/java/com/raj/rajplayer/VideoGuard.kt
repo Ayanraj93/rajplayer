@@ -2,87 +2,23 @@ package com.raj.rajplayer
 
 import android.os.Handler
 import android.os.Looper
-import org.videolan.libvlc.MediaPlayer
-import org.videolan.libvlc.util.VLCVideoLayout
+import android.view.View
 
-// Awaaz chal rahi ho par video black ho to apne aap theek karta hai
+/** Media3 owns surface recovery and late-frame dropping; this guard only observes health. */
 object VideoGuard {
-    private val h = Handler(Looper.getMainLooper())
-    private var layout: VLCVideoLayout? = null
-    private var key = ""
-    private var bad = 0
-    private var stage = 0
-
+    private val handler = Handler(Looper.getMainLooper())
+    private var view: View? = null
+    private var lastDrops = 0L
     private val loop = object : Runnable {
         override fun run() {
-            watch()
-            h.postDelayed(this, 1000)
-        }
-    }
-
-    fun start(l: VLCVideoLayout) {
-        layout = l
-        bad = 0
-        h.removeCallbacks(loop)
-        h.postDelayed(loop, 1500)
-    }
-
-    fun stop() {
-        h.removeCallbacks(loop)
-        layout = null
-    }
-
-    private fun watch() {
-        val p = Engine.mp ?: return
-        val l = layout ?: return
-        if (!Engine.active || !Engine.isVideo || Engine.items.isEmpty() || !p.isPlaying) {
-            bad = 0
-            return
-        }
-        val k = Engine.cur().toString()
-        if (k != key) {
-            key = k
-            stage = 0
-            bad = 0
-        }
-        if (!Engine.voutEver || p.getVideoTracksCount() <= 0 || p.getTime() < 800) {
-            bad = 0
-            return
-        }
-        if (Engine.vout > 0) {
-            bad = 0
-            stage = 0
-            return
-        }
-        bad++
-        if (bad < 2) return
-        bad = 0
-        if (stage == 0) {
-            stage = 1
-            revive(p, l)
-        } else if (stage == 1) {
-            stage = 2
-            Engine.forceSoft = true
-            Engine.loadAt(l.context, Engine.idx)
-        }
-    }
-
-    private fun revive(p: MediaPlayer, l: VLCVideoLayout) {
-        try {
-            p.detachViews()
-        } catch (e: Exception) {
-        }
-        try {
-            p.attachViews(l, null, true, false)
-        } catch (e: Exception) {
-        }
-        try {
-            val t = p.getVideoTrack()
-            if (t >= 0) {
-                p.setVideoTrack(-1)
-                p.setVideoTrack(t)
+            val now = Engine.droppedFrames
+            if (Engine.active && Engine.isVideo && Engine.isPlaying() && now > lastDrops) {
+                // Intentionally do not detach/re-attach the surface: doing so can cause black frames.
+                lastDrops = now
             }
-        } catch (e: Exception) {
+            handler.postDelayed(this, 1500L)
         }
     }
+    fun start(v: View) { view = v; lastDrops = Engine.droppedFrames; handler.removeCallbacks(loop); handler.postDelayed(loop, 1500L) }
+    fun stop() { handler.removeCallbacks(loop); view = null }
 }

@@ -33,13 +33,11 @@ import android.widget.TextView
 import android.widget.Toast
 import java.io.File
 import java.util.Locale
-import org.videolan.libvlc.MediaPlayer
-import org.videolan.libvlc.util.VLCVideoLayout
 
 open class PlayerActivity : Activity() {
 
     companion object {
-        var current: VLCVideoLayout? = null
+        var current: FrameLayout? = null
         var savedVTrack = -2
         var savedKey = ""
     }
@@ -49,7 +47,7 @@ open class PlayerActivity : Activity() {
     private val mp: MediaPlayer get() = Engine.mp!!
 
     private lateinit var root: FrameLayout
-    private lateinit var layout: VLCVideoLayout
+    private lateinit var layout: FrameLayout
     private lateinit var touchView: View
     private lateinit var topBar: LinearLayout
     private lateinit var controls: LinearLayout
@@ -89,10 +87,9 @@ open class PlayerActivity : Activity() {
     private var lastFy = 0f
 
     // speed: 0.25x .. 4x (ruler) + smart auto-fix
-    private var rate = 1f
-    private var audioDelayMs = 0
-    private val guard = SpeedGuard()
-    private var decoderSwitched = false
+    private var rate = 4f
+    private var lastDropNoticeAt = 0L
+    private var lastDropCountSeen = 0L
 
     private val scales = listOf(
         MediaPlayer.ScaleType.SURFACE_BEST_FIT,
@@ -131,9 +128,16 @@ open class PlayerActivity : Activity() {
                 if (abA >= 0 && abB > abA && t >= abB) seekTo(abA)
                 if (!userSeeking) curTv.text = fmt(t)
                 playBtn.text = if (p.isPlaying) "\u23F8" else "\u25B6"
-                if (Tuning.autoFix(this@PlayerActivity)) {
-                    val act = guard.sample(SystemClock.elapsedRealtime(), t, p.isPlaying && !userSeeking, rate)
-                    if (act != 0) handleGuard(act)
+                // Media3 handles late-frame dropping against its playback clock. Do not
+                // infer decoder failure from wall-clock position deltas or reload on a seek.
+                val dropsNow = Engine.droppedFrames
+                if (Tuning.autoFix(this@PlayerActivity) && dropsNow - lastDropCountSeen >= 8L) {
+                    val now = SystemClock.elapsedRealtime()
+                    lastDropCountSeen = dropsNow
+                    if (now - lastDropNoticeAt > 8000L) {
+                        lastDropNoticeAt = now
+                        showMsg("Auto-Fix: Media3 is skipping late frames without restarting playback")
+                    }
                 }
             }
             ui.postDelayed(this, if (rate > 2f) 800L else 500L)
@@ -250,6 +254,7 @@ open class PlayerActivity : Activity() {
         } catch (e: Exception) {
         }
         mp.attachViews(layout, null, true, ColorGrade.on(this))
+        atomic?.excludeSurfacesIn(layout)
         current = layout
         layout.post { ColorGrade.apply(this, layout) }
     }
@@ -305,13 +310,8 @@ open class PlayerActivity : Activity() {
             p.setRate(rate)
         } catch (e: Exception) {
         }
-        try {
-            p.setAudioDelay(audioDelayMs * 1000L)
-        } catch (e: Exception) {
-        }
         atomic?.setPaused(rate > 2f)
         speedBtn.text = rateLabel(rate)
-        guard.reset()
     }
 
     private fun setRateTo(r: Float) {
@@ -325,67 +325,22 @@ open class PlayerActivity : Activity() {
     }
 
     private fun seekTo(ms: Long) {
-        guard.reset()
         mp.setTime(ms)
     }
 
-    private fun handleGuard(act: Int) {
-        when (act) {
-            1 -> {
-                seekTo(mp.getTime())
-                showMsg("Auto-fix: re-syncing")
-            }
-            2 -> {
-                setRateTo(Math.max(1f, rate - 0.5f))
-                showMsg("Auto-fix: speed " + rateLabel(rate) + " for smooth playback")
-            }
-            3 -> switchDecoder()
-            else -> {}
-        }
-    }
-
-    // lag par decoder badlo (HW <-> SW), sirf ek baar har video par
-    private fun switchDecoder() {
-        if (Engine.items.isEmpty() || decoderSwitched) return
-        decoderSwitched = true
-        val key = Engine.cur().toString()
-        val toSw = !Tuning.isSw(key) && Tuning.decMode(this) != "sw"
-        if (toSw) Tuning.forceSw(key) else Tuning.forceHw(key)
-        showMsg("Auto-fix: switching to " + (if (toSw) "SW" else "HW") + " decoder")
-        Engine.loadAt(this, Engine.idx)
-    }
-
     private fun decoderDialog() {
-        val modes = arrayOf("auto", "hw", "hwplus", "sw")
-        val names = arrayOf(
-            "Auto (HW, falls back to SW)",
-            "HW decoder",
-            "HW+ decoder (forced hardware)",
-            "SW decoder (software)"
-        )
-        val cur = modes.indexOf(Tuning.decMode(this))
         AlertDialog.Builder(this)
-            .setTitle("Decoder")
-            .setSingleChoiceItems(names, cur) { dlg, i ->
-                Tuning.setDecMode(this, modes[i])
-                Tuning.clearOverrides()
-                dlg.dismiss()
-                if (Engine.items.isNotEmpty()) Engine.loadAt(this, Engine.idx)
-                showMsg("Decoder: " + names[i])
-            }
+            .setTitle("Media3 hardware decoder")
+            .setMessage("Engine: AndroidX Media3 ExoPlayer\nVideo decoder: ${Engine.videoDecoderName}\n\nMedia3 selects a supported Android MediaCodec decoder. VLC HW+ is not a Media3 mode. The video surface remains attached during seeks to reduce avoidable black frames.")
+            .setPositiveButton("OK", null)
             .show()
     }
 
     private fun audioSyncDialog() {
-        val vals = intArrayOf(-500, -300, -200, -100, -50, 0, 50, 100, 200, 300, 500)
-        val names = vals.map { (if (it > 0) "+" else "") + it + " ms" + (if (it == 0) " (default)" else "") }.toTypedArray()
         AlertDialog.Builder(this)
-            .setTitle("Audio sync (now " + audioDelayMs + " ms)")
-            .setItems(names) { _, i ->
-                audioDelayMs = vals[i]
-                applyRate()
-                showMsg("Audio delay " + audioDelayMs + " ms")
-            }
+            .setTitle("Audio / Video synchronization")
+            .setMessage("Media3 synchronizes audio and video using the media timestamps and playback clock. Manual audio offset is not yet implemented in this engine migration.")
+            .setPositiveButton("OK", null)
             .show()
     }
 
@@ -408,8 +363,7 @@ open class PlayerActivity : Activity() {
         titleTv.text = Engine.title
         abA = -1L
         abB = -1L
-        guard.newItem()
-        decoderSwitched = false
+        lastDropCountSeen = Engine.droppedFrames
         Prefs.setLastPlayedUri(this, cu.toString())
         if (Prefs.autoOrient(this)) Orient.setFor(this, cu) { videoPortrait = it }
         resetZoom()
@@ -470,7 +424,6 @@ open class PlayerActivity : Activity() {
                     1 -> decoderDialog()
                     2 -> {
                         Tuning.setAutoFix(this, !Tuning.autoFix(this))
-                        guard.newItem()
                         showMsg("Smart auto-fix " + onOff(Tuning.autoFix(this)))
                     }
                     3 -> Dialogs.eq(this)
@@ -799,7 +752,7 @@ open class PlayerActivity : Activity() {
             root.addView(av, FrameLayout.LayoutParams(MP, MP))
         }
 
-        layout = VLCVideoLayout(this)
+        layout = FrameLayout(this)
         root.addView(layout, FrameLayout.LayoutParams(MP, MP))
         atomic?.excludeSurfacesIn(layout)
 
@@ -913,7 +866,7 @@ open class PlayerActivity : Activity() {
 
         val exRow = LinearLayout(this)
         exRow.gravity = Gravity.CENTER
-        speedBtn = ib("1x", 14f) { openSpeed() }
+        speedBtn = ib("4x", 14f) { openSpeed() }
         speedBtn.setOnLongClickListener {
             setRateTo(1f)
             showMsg("Speed 1x")

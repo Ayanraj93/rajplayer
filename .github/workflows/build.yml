@@ -1,7 +1,7 @@
-name: Build APK
+name: Build RajPlayer Media3 APK
 on:
   push:
-    branches: [main]
+    branches: [main, rajplayer-refresh-seek, media3-engine-migration]
   workflow_dispatch:
 jobs:
   build:
@@ -12,11 +12,18 @@ jobs:
         with:
           distribution: temurin
           java-version: 17
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK 36
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: 8.7
-      - run: gradle assembleDebug --no-daemon
+          gradle-version: 8.13
+      - name: Verify Media3 engine source
+        run: bash ./verify_media3_engine.sh
+      - name: Build debug APK
+        run: gradle assembleDebug --no-daemon --stacktrace
       - uses: actions/upload-artifact@v4
         with:
-          name: RajPlayer-apk
+          name: RajPlayer-Media3-debug-apk
           path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error

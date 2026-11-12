@@ -152,7 +152,7 @@ object SpeedPanel {
 
         val autoBtn = Button(a)
         fun paintAuto() {
-            autoBtn.text = "Smart auto-fix: " + (if (Tuning.autoFix(a)) "ON" else "OFF")
+            autoBtn.text = "Frame-drop Auto-Fix: " + (if (Tuning.autoFix(a)) "ON" else "OFF")
         }
         paintAuto()
         autoBtn.setOnClickListener {
@@ -171,7 +171,7 @@ object SpeedPanel {
         box.addView(decBtn)
 
         val tip = TextView(a)
-        tip.text = "Drag the ruler. If the phone cannot keep up at high speed, Smart auto-fix lowers the speed or switches the decoder by itself."
+        tip.text = "Media3 uses Android MediaCodec and its playback clock. Auto-Fix monitors dropped frames and avoids disruptive decoder reloads or speed changes."
         tip.setTextColor(0xCCFFFFFF.toInt())
         tip.textSize = 11f
         box.addView(tip)
