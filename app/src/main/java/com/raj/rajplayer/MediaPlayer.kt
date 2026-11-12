@@ -36,7 +36,7 @@ class MediaPlayer(val player: ExoPlayer) {
     }
 
     val isPlaying: Boolean get() = player.isPlaying
-    val time: Long get() = player.currentPosition.coerceAtLeast(0L)
+    val currentTime: Long get() = player.currentPosition.coerceAtLeast(0L)
 
     fun play() { player.playWhenReady = true; player.play() }
     fun pause() { player.pause() }
