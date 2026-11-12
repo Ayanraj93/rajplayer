@@ -201,7 +201,7 @@ class MainActivity : Activity() {
     private fun openUri(u: Uri, mime: String?) {
         val t = mime ?: contentResolver.getType(u) ?: ""
         val aud = t.startsWith("audio/") || (t.isEmpty() && looksAudio(u))
-        val cls: Class<*> = if (aud) AudioActivity::class.java else Orient.videoClass(this, u)
+        val cls: Class<*> = if (aud) AudioActivity::class.java else Router.videoClass(this, u)
         val i = Intent(this, cls)
         i.data = u
         i.clipData = ClipData.newRawUri("media", u)
@@ -422,7 +422,7 @@ class MainActivity : Activity() {
         val aud = isAudio(cur.uri)
         val q = list.filter { isAudio(it.uri) == aud }
         val qi = q.indexOfFirst { it.uri == cur.uri }
-        val cls: Class<*> = if (aud) AudioActivity::class.java else Orient.videoClass(this, cur.uri)
+        val cls: Class<*> = if (aud) AudioActivity::class.java else Router.videoClass(this, cur.uri)
         val i = Intent(this, cls)
         i.data = cur.uri
         i.putStringArrayListExtra("list", ArrayList(q.map { it.uri.toString() }))
@@ -434,7 +434,7 @@ class MainActivity : Activity() {
 
     private fun openNowPlaying() {
         val cls: Class<*> =
-            if (Engine.isVideo) Orient.videoClass(this, Engine.items.getOrNull(Engine.idx))
+            if (Engine.isVideo) Router.videoClass(this, Engine.items.getOrNull(Engine.idx))
             else AudioActivity::class.java
         val i = Intent(this, cls)
         i.data = Engine.items.getOrNull(Engine.idx)
@@ -1137,6 +1137,10 @@ class MainActivity : Activity() {
         // ---- video / playback ----
         root.addView(label("Video & Playback", 16f, tc))
         toggle(root, "Auto-rotate to match video", Prefs.autoOrient(this), ac) { Prefs.setAutoOrient(this, !Prefs.autoOrient(this)) }
+        root.addView(button("Video engine: " + Router.modeLabel(this), ac) {
+            Router.cycle(this)
+            refreshSettings()
+        })
         toggle(root, "Background Audio", Prefs.bgAudio(this), ac) {
             Prefs.setBgAudio(this, !Prefs.bgAudio(this))
             Engine.bgAudio = Prefs.bgAudio(this)
