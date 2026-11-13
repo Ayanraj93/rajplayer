@@ -36,6 +36,7 @@ class AudioActivity : Activity() {
     private lateinit var durTv: TextView
     private lateinit var seek: SeekBar
     private lateinit var playBtn: TextView
+    private lateinit var speedBtn: TextView
     private lateinit var shufBtn: TextView
     private lateinit var repBtn: TextView
     private lateinit var artImg: ImageView
@@ -45,8 +46,8 @@ class AudioActivity : Activity() {
     private val pool = Executors.newSingleThreadExecutor()
     private var userSeeking = false
     private var artKey = ""
-    private val speeds = floatArrayOf(1f, 1.5f, 2f, 3f, 4f)
-    private var speedIdx = 4
+    private val speeds = floatArrayOf(1f, 1.5f, 2f, 2.5f, 3f, 4f)
+    private var speedIdx = 0
     private val rgbTargets = ArrayList<(Int) -> Unit>()
 
     private val lis = object : Engine.Listener {
@@ -286,11 +287,12 @@ class AudioActivity : Activity() {
         val ex = LinearLayout(this)
         ex.gravity = Gravity.CENTER
         ex.setPadding(0, dp(12), 0, 0)
-        ex.addView(ib("4x", 14f, ic) { b ->
+        speedBtn = ib("1x", 14f, ic) { b ->
             speedIdx = (speedIdx + 1) % speeds.size
             Engine.mp?.setRate(speeds[speedIdx])
             b.text = speeds[speedIdx].toString() + "x"
-        })
+        }
+        ex.addView(speedBtn)
         ex.addView(ib("EQ", 14f, ic) { Dialogs.eq(this) })
         ex.addView(ib("Boost", 14f, ic) { Dialogs.boost(this) })
         ex.addView(ib("Sleep", 14f, ic) { Dialogs.sleep(this) })
@@ -331,7 +333,9 @@ class AudioActivity : Activity() {
         }
         Prefs.setLastPlayedUri(this, Engine.cur().toString())
         titleTv.text = Engine.title
-        Engine.mp?.setRate(speeds[speedIdx])
+        speedIdx = 0
+        Engine.mp?.setRate(1f)
+        if (::speedBtn.isInitialized) speedBtn.text = "1x"
         subTv.text = (Engine.idx + 1).toString() + " / " + Engine.items.size
         loadArt()
         update()

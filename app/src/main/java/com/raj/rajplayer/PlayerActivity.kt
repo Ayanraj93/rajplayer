@@ -87,7 +87,7 @@ open class PlayerActivity : Activity() {
     private var lastFy = 0f
 
     // speed: 0.25x .. 4x (ruler) + smart auto-fix
-    private var rate = 4f
+    private var rate = 1f
     private var lastDropNoticeAt = 0L
     private var lastDropCountSeen = 0L
 
@@ -360,6 +360,7 @@ open class PlayerActivity : Activity() {
             return
         }
         val cu = Engine.cur()
+        rate = 1f
         titleTv.text = Engine.title
         abA = -1L
         abB = -1L
@@ -866,7 +867,7 @@ open class PlayerActivity : Activity() {
 
         val exRow = LinearLayout(this)
         exRow.gravity = Gravity.CENTER
-        speedBtn = ib("4x", 14f) { openSpeed() }
+        speedBtn = ib("1x", 14f) { openSpeed() }
         speedBtn.setOnLongClickListener {
             setRateTo(1f)
             showMsg("Speed 1x")

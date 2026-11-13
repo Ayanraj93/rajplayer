@@ -97,7 +97,7 @@ object Engine {
         val exo = ExoPlayer.Builder(app, renderers)
             .setLoadControl(loadControl)
             .build()
-        exo.setPlaybackParameters(PlaybackParameters(4f, 1f))
+        exo.setPlaybackParameters(PlaybackParameters(1f, 1f))
         exo.setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
         exo.setVideoScalingMode(androidx.media3.common.C.VIDEO_SCALING_MODE_SCALE_TO_FIT)
         exo.addListener(object : Player.Listener {
@@ -186,7 +186,7 @@ object Engine {
             val item = MediaItem.Builder().setUri(uri).setMediaId(uri.toString()).build()
             p.player.setMediaItem(item, resume.coerceAtLeast(0L))
             p.player.setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
-            p.player.setPlaybackParameters(PlaybackParameters(4f, 1f))
+            p.player.setPlaybackParameters(PlaybackParameters(1f, 1f))
             requestFocus()
             p.player.prepare()
             p.player.playWhenReady = true

@@ -16,4 +16,4 @@ fi
 printf '%s\n' 'PASS: Active app source uses AndroidX Media3 ExoPlayer; no LibVLC dependency or VLC imports remain.'
 printf '%s\n' 'Decoder: Android MediaCodec selection via Media3 DefaultRenderersFactory.'
 printf '%s\n' 'Video output: SurfaceView by default; TextureView only while Color Grading is enabled.'
-printf '%s\n' 'Audio speed: 4x default, pitch=1.0, Media3 application-level time stretching.'
+printf '%s\n' 'Audio speed: 1x default, pitch=1.0, Media3 application-level time stretching.'
