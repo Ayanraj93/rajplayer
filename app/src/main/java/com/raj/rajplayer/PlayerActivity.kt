@@ -1,6 +1,9 @@
 package com.raj.rajplayer
 
 import android.app.Activity
+import android.view.animation.LinearInterpolator
+import android.graphics.Matrix
+import android.animation.ValueAnimator
 import android.app.AlertDialog
 import android.app.PictureInPictureParams
 import android.content.Intent
@@ -8,6 +11,8 @@ import android.content.pm.ActivityInfo
 import android.content.res.ColorStateList
 import android.content.res.Configuration
 import android.graphics.Color
+import android.graphics.LinearGradient
+import android.graphics.Shader
 import android.graphics.drawable.GradientDrawable
 import android.media.AudioManager
 import android.net.Uri
@@ -53,6 +58,9 @@ open class PlayerActivity : Activity() {
     private lateinit var controls: LinearLayout
     private lateinit var lockBtn: TextView
     private lateinit var titleTv: TextView
+    private var titleRgbAnimator: ValueAnimator? = null
+    private var titleRgbShader: LinearGradient? = null
+    private val titleRgbMatrix = Matrix()
     private lateinit var msgTv: TextView
     private lateinit var seek: SeekBar
     private lateinit var curTv: TextView
@@ -354,6 +362,48 @@ open class PlayerActivity : Activity() {
         showControls()
     }
 
+
+
+    private fun startVideoTitleRgbAnimation() {
+        titleRgbAnimator?.cancel()
+        titleRgbShader = null
+        titleTv.paint.shader = null
+
+        titleTv.post {
+            if (isFinishing || isDestroyed) return@post
+
+            val width = titleTv.width.toFloat().coerceAtLeast(
+                titleTv.paint.measureText(titleTv.text.toString()).coerceAtLeast(1f)
+            )
+            val rainbow = intArrayOf(
+                Color.RED, 0xFFFF9800.toInt(), Color.YELLOW,
+                Color.GREEN, Color.CYAN, Color.BLUE,
+                0xFFE040FB.toInt(), Color.RED
+            )
+
+            val shader = LinearGradient(
+                0f, 0f, width, 0f,
+                rainbow, null, Shader.TileMode.MIRROR
+            )
+            titleRgbShader = shader
+            titleTv.paint.shader = shader
+
+            val animator = ValueAnimator.ofFloat(0f, 1f).apply {
+                duration = 3200L
+                repeatCount = ValueAnimator.INFINITE
+                interpolator = LinearInterpolator()
+                addUpdateListener { animation ->
+                    val shift = width * (animation.animatedValue as Float)
+                    titleRgbMatrix.setTranslate(-shift, 0f)
+                    titleRgbShader?.setLocalMatrix(titleRgbMatrix)
+                    titleTv.invalidate()
+                }
+            }
+            titleRgbAnimator = animator
+            animator.start()
+        }
+    }
+
     private fun onItem() {
         if (!Engine.active || Engine.items.isEmpty()) {
             finish()
@@ -362,6 +412,7 @@ open class PlayerActivity : Activity() {
         val cu = Engine.cur()
         rate = 1f
         titleTv.text = Engine.title
+        startVideoTitleRgbAnimation()
         abA = -1L
         abB = -1L
         lastDropCountSeen = Engine.droppedFrames
@@ -995,6 +1046,9 @@ open class PlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        titleRgbAnimator?.cancel()
+        titleRgbAnimator = null
+        titleRgbShader = null
         super.onDestroy()
         ui.removeCallbacksAndMessages(null)
         if (Engine.listener === lis) Engine.listener = null

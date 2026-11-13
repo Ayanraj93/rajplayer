@@ -81,6 +81,14 @@ class MainActivity : Activity() {
     private var selectMode = false
     private val selected = LinkedHashSet<String>()
     private val rgbTargets = ArrayList<(Int) -> Unit>()
+    private var metaColors = intArrayOf(Color.CYAN, Color.YELLOW, Color.MAGENTA, Color.GREEN)
+
+    private fun changeMetaColors() {
+        val baseHue = java.util.Random().nextFloat() * 360f
+        metaColors = IntArray(4) { i ->
+            Color.HSVToColor(floatArrayOf((baseHue + i * 90f) % 360f, 0.78f, 0.98f))
+        }
+    }
 
     private val ui = Handler(Looper.getMainLooper())
     private val cache = LruCache<String, Bitmap>(120)
@@ -346,7 +354,7 @@ class MainActivity : Activity() {
         val sub = if (isAudio(v.uri)) {
             folder + " \u2022 " + sizeStr(v.size)
         } else {
-            "Folder: " + folder + "\nSize: " + sizeStr(v.size)
+            folder + "\nSize: " + sizeStr(v.size)
         }
         return Item(v.name, sub, v.uri, durStr(v.dur), badge, res)
     }
@@ -738,8 +746,27 @@ class MainActivity : Activity() {
             v.setBackgroundColor(if (isLast) (ac and 0x00FFFFFF) or 0x33000000 else Color.TRANSPARENT)
             holder.title.text = (if (isLast) "\u25B6 " else "") + item.title
             holder.title.setTextColor(if (isLast) ac else tc)
-            holder.sub.text = item.sub
-            holder.sub.setTextColor(Color.parseColor("#AAB4C3"))
+            if (u != null && !isFolder && !isAudio(u)) {
+                val subText = android.text.SpannableString(item.sub)
+                val pathEnd = item.sub.indexOf('\n').let { if (it < 0) item.sub.length else it }
+                if (pathEnd > 0) {
+                    subText.setSpan(
+                        android.text.style.ForegroundColorSpan(metaColors[0]),
+                        0, pathEnd, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                }
+                val sizeStart = item.sub.indexOf("Size:")
+                if (sizeStart >= 0) {
+                    subText.setSpan(
+                        android.text.style.ForegroundColorSpan(metaColors[1]),
+                        sizeStart, item.sub.length, android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                }
+                holder.sub.text = subText
+            } else {
+                holder.sub.text = item.sub
+                holder.sub.setTextColor(Color.parseColor("#AAB4C3"))
+            }
             holder.badge.text = item.badge
             holder.badge.visibility = if (item.badge.isEmpty()) View.GONE else View.VISIBLE
 
@@ -754,7 +781,28 @@ class MainActivity : Activity() {
                     if (inf.fps > 0f) s += (if (s.isEmpty()) "" else "  \u2022  ") + VideoInfo.fpsLabel(inf.fps) + " fps"
                     if (inf.hdr != "SDR") s += (if (s.isEmpty()) "" else "  \u2022  ") + inf.hdr
                 }
-                holder.info.text = s
+                val infoText = android.text.SpannableString(s)
+                val qualityLabel = if (inf != null && inf.w > 0 && inf.h > 0)
+                    VideoInfo.listResLabel(inf.w, inf.h) else item.res
+                val qualityStart = if (qualityLabel.isNotEmpty()) s.indexOf(qualityLabel) else -1
+                if (qualityStart >= 0) {
+                    infoText.setSpan(
+                        android.text.style.ForegroundColorSpan(metaColors[2]),
+                        qualityStart, qualityStart + qualityLabel.length,
+                        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                }
+                val fpsLabel = if (inf != null && inf.fps > 0f)
+                    VideoInfo.fpsLabel(inf.fps) + " fps" else ""
+                val fpsStart = if (fpsLabel.isNotEmpty()) s.indexOf(fpsLabel) else -1
+                if (fpsStart >= 0) {
+                    infoText.setSpan(
+                        android.text.style.ForegroundColorSpan(metaColors[3]),
+                        fpsStart, fpsStart + fpsLabel.length,
+                        android.text.Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
+                    )
+                }
+                holder.info.text = infoText
                 holder.info.setTextColor(Color.parseColor("#AAB4C3"))
                 holder.info.visibility = if (s.isEmpty()) View.GONE else View.VISIBLE
                 if (inf == null) VideoInfo.probeAsync(this@MainActivity, u) { ui.post { infoRefresh() } }
@@ -954,6 +1002,7 @@ class MainActivity : Activity() {
     }
 
     private fun renderList() {
+        changeMetaColors()
         val tc = Prefs.text(this)
         val ac = Prefs.accent(this)
         listHolder.removeAllViews()

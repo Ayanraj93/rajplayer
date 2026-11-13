@@ -49,7 +49,6 @@ object Engine {
     private var resumeOnFocus = false
     private var wake: PowerManager.WakeLock? = null
     private var wifi: WifiManager.WifiLock? = null
-    private var lastDropWarningAt = 0L
     private val sleepRun = Runnable { pause(); notifyChanged() }
 
     private fun holdLocks() {
@@ -132,13 +131,8 @@ object Engine {
                 videoDecoderName = decoderName
             }
             override fun onDroppedVideoFrames(eventTime: AnalyticsListener.EventTime, droppedFrames: Int, elapsedMs: Long) {
+                // Keep internal frame-drop monitoring; do not interrupt playback with a Toast.
                 this@Engine.droppedFrames += droppedFrames.toLong()
-                val now = android.os.SystemClock.elapsedRealtime()
-                // Report measured drops; do not reload the item or switch to software decoding mid-playback.
-                if (droppedFrames >= 12 && now - lastDropWarningAt > 10000L) {
-                    lastDropWarningAt = now
-                    main.post { Toast.makeText(app, "Frame drops detected (${this@Engine.droppedFrames} total). Playback timeline kept running.", Toast.LENGTH_SHORT).show() }
-                }
             }
         })
         val compat = MediaPlayer(exo)
