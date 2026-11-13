@@ -49,6 +49,23 @@ object VideoInfo {
         }
     }
 
+    // Compact quality labels for Video List only.
+    // Video Details continues using resLabel() and full width x height.
+    fun listResLabel(w: Int, h: Int): String {
+        val shortSide = minOf(w, h)
+        return when {
+            shortSide >= 4320 -> "8K"
+            shortSide >= 2160 -> "4K"
+            shortSide >= 1440 -> "2K"
+            shortSide >= 1080 -> "1080p"
+            shortSide >= 720 -> "720p"
+            shortSide >= 480 -> "480p"
+            shortSide >= 360 -> "360p"
+            shortSide >= 240 -> "240p"
+            else -> "144p"
+        }
+    }
+
     fun fpsLabel(f: Float): String {
         val r = Math.round(f)
         return if (Math.abs(f - r) < 0.05f) r.toString() else String.format("%.2f", f)

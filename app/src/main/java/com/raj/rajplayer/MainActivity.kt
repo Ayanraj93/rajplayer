@@ -341,8 +341,14 @@ class MainActivity : Activity() {
     }
 
     private fun itemOf(v: V, badge: String): Item {
-        val res = if (isAudio(v.uri) || v.w <= 0 || v.h <= 0) "" else VideoInfo.resLabel(v.w, v.h)
-        return Item(v.name, folderName(v.folder) + " \u2022 " + sizeStr(v.size), v.uri, durStr(v.dur), badge, res)
+        val res = if (isAudio(v.uri) || v.w <= 0 || v.h <= 0) "" else VideoInfo.listResLabel(v.w, v.h)
+        val folder = v.folder.trim('/').ifEmpty { "Internal Storage" }
+        val sub = if (isAudio(v.uri)) {
+            folder + " \u2022 " + sizeStr(v.size)
+        } else {
+            "Folder: " + folder + "\nSize: " + sizeStr(v.size)
+        }
+        return Item(v.name, sub, v.uri, durStr(v.dur), badge, res)
     }
 
     // FPS peeche pata chalne par list ko halka sa refresh
@@ -690,12 +696,14 @@ class MainActivity : Activity() {
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
         col.setPadding(dp(12), 0, 0, 0)
-        val title = TextView(this)
+        val title = RgbTextView(this)
         title.textSize = 14f
         title.maxLines = 2
         title.ellipsize = TextUtils.TruncateAt.END
         val sub = TextView(this)
         sub.textSize = 12f
+        sub.maxLines = 2
+        sub.ellipsize = TextUtils.TruncateAt.END
         val info = TextView(this)
         info.textSize = 11.5f
         info.setTypeface(null, Typeface.BOLD)
@@ -731,21 +739,24 @@ class MainActivity : Activity() {
             holder.title.text = (if (isLast) "\u25B6 " else "") + item.title
             holder.title.setTextColor(if (isLast) ac else tc)
             holder.sub.text = item.sub
-            holder.sub.setTextColor((tc and 0x00FFFFFF) or 0x99000000.toInt())
+            holder.sub.setTextColor(Color.parseColor("#AAB4C3"))
             holder.badge.text = item.badge
             holder.badge.visibility = if (item.badge.isEmpty()) View.GONE else View.VISIBLE
 
-            // resolution (144p..4K) + FPS + HDR
-            if (item.res.isEmpty() || u == null) {
+            // Compact video quality + FPS + HDR; full dimensions remain in Video Details.
+            if (u == null || isFolder || isAudio(u)) {
                 holder.info.visibility = View.GONE
             } else {
                 val inf = VideoInfo.cached(u)
                 var s = item.res
-                if (inf != null && inf.fps > 0f) s += "  \u2022  " + VideoInfo.fpsLabel(inf.fps) + " fps"
-                if (inf != null && inf.hdr != "SDR") s += "  \u2022  " + inf.hdr
+                if (inf != null) {
+                    if (inf.w > 0 && inf.h > 0) s = VideoInfo.listResLabel(inf.w, inf.h)
+                    if (inf.fps > 0f) s += (if (s.isEmpty()) "" else "  \u2022  ") + VideoInfo.fpsLabel(inf.fps) + " fps"
+                    if (inf.hdr != "SDR") s += (if (s.isEmpty()) "" else "  \u2022  ") + inf.hdr
+                }
                 holder.info.text = s
-                holder.info.setTextColor(ac)
-                holder.info.visibility = View.VISIBLE
+                holder.info.setTextColor(Color.parseColor("#AAB4C3"))
+                holder.info.visibility = if (s.isEmpty()) View.GONE else View.VISIBLE
                 if (inf == null) VideoInfo.probeAsync(this@MainActivity, u) { ui.post { infoRefresh() } }
             }
 
