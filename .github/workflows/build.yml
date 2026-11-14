@@ -25,7 +25,7 @@ jobs:
           packages: 'platform-tools'
 
       - name: Install Android SDK 36
-        run: sdkmanager "platforms;android-36" "build-tools;36.0.0"
+        run: sdkmanager "platforms;android-36" "build-tools;36.0.0" "ndk;27.2.12479018" "cmake;3.22.1"
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -37,6 +37,12 @@ jobs:
 
       - name: Build debug APK
         run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: Verify MP3 encoder ABIs
+        run: |
+          APK="app/build/outputs/apk/debug/app-debug.apk"
+          unzip -l "$APK" | grep -q "lib/armeabi-v7a/librajplayer_mp3.so"
+          unzip -l "$APK" | grep -q "lib/arm64-v8a/librajplayer_mp3.so"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

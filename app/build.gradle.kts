@@ -17,6 +17,15 @@ android {
         targetSdk = 35
         versionCode = 18
         versionName = "1.4-media3"
+        externalNativeBuild {
+            cmake {
+                cppFlags += "-std=c++17"
+                arguments += "-DANDROID_STL=c++_static"
+            }
+        }
+        ndk {
+            abiFilters += listOf("armeabi-v7a", "arm64-v8a")
+        }
     }
 
     signingConfigs {
@@ -27,6 +36,20 @@ android {
             keyPassword = "rajplayer123"
         }
     }
+
+
+    buildFeatures {
+        prefab = true
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
+    }
+
+    ndkVersion = "27.2.12479018"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -43,4 +66,6 @@ dependencies {
     implementation("androidx.media3:media3-exoplayer-dash:$media3Version")
     implementation("androidx.media3:media3-exoplayer-rtsp:$media3Version")
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
+    // LGPL LAME 3.100 Prefab package; built for Android native ABIs.
+    implementation("com.fpliu.ndk.pkg.prefab.android.21:lame:3.100")
 }

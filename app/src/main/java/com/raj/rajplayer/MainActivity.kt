@@ -514,7 +514,16 @@ class MainActivity : Activity() {
     private fun refreshContainer(content: View, accent: Int): SwipeRefreshLayout {
         val swipe = SwipeRefreshLayout(this)
         swipe.setColorSchemeColors(accent, Theme.rgbNow(120f), Theme.rgbNow(240f))
-        swipe.setOnRefreshListener { reloadMedia() }
+        // Pull-to-refresh rebuilds the list and resets its scroll position. Disable it
+        // completely while selecting so drag-selection and scrolling never trigger refresh.
+        swipe.isEnabled = !selectMode
+        swipe.setOnRefreshListener {
+            if (selectMode) {
+                swipe.isRefreshing = false
+            } else {
+                reloadMedia()
+            }
+        }
         swipe.addView(content, ViewGroup.LayoutParams(MP, MP))
         swipeRefresh = swipe
         return swipe
@@ -963,7 +972,7 @@ class MainActivity : Activity() {
             • Back to Video: reopen the video player
 
             MAIN SCREEN
-            • Double tap RajPlayer title: open multiple-video selection for conversion
+            • Long press RajPlayer title: open multiple-video selection for conversion
         """.trimIndent()
         AlertDialog.Builder(this)
             .setTitle("RajPlayer Gesture Guide")
@@ -1027,17 +1036,14 @@ class MainActivity : Activity() {
             brand.text = "\u26A1 RajPlayer Pro"
             brand.textSize = 22f
             brand.setTypeface(null, Typeface.BOLD)
-            val brandGesture = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
-                override fun onDown(e: MotionEvent): Boolean = true
-                override fun onDoubleTap(e: MotionEvent): Boolean {
-                    selectMode = true
-                    selected.clear()
-                    toast("Select videos for multiple conversion")
-                    showHome()
-                    return true
-                }
-            })
-            brand.setOnTouchListener { _, event -> brandGesture.onTouchEvent(event) }
+            // Long-press avoids accidental conversion selection while tapping the title.
+            brand.setOnLongClickListener {
+                selectMode = true
+                selected.clear()
+                toast("Select videos for multiple conversion")
+                showHome()
+                true
+            }
             head.addView(brand, LinearLayout.LayoutParams(0, WC, 1f))
             head.addView(sym("\uD83D\uDD0D", ic) {
                 searchOn = !searchOn
