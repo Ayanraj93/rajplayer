@@ -18,6 +18,8 @@ import android.os.Looper
 import android.text.TextUtils
 import android.util.Size
 import android.view.Gravity
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
@@ -199,6 +201,14 @@ class AudioActivity : Activity() {
         val root = FrameLayout(this)
         rootView = root
         root.setBackgroundColor(audioPalette(Prefs.audioTheme(this))[0])
+        val audioBackgroundGestures = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                if (audioSystemBarsHidden) showAudioSystemBars() else hideAudioSystemBars()
+                return true
+            }
+        })
+        root.setOnTouchListener { _, event -> audioBackgroundGestures.onTouchEvent(event) }
         val w = Prefs.audioWall(this)
         if (w != null) {
             try {

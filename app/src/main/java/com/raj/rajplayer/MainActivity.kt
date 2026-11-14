@@ -25,6 +25,8 @@ import android.text.InputType
 import android.util.LruCache
 import android.util.Size
 import android.view.Gravity
+import android.view.GestureDetector
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.widget.AdapterView
@@ -1011,8 +1013,8 @@ class MainActivity : Activity() {
             head.addView(sym("\u2611", ic) { selectAll() })
             head.addView(sym("\u2B50", ic) { favSelected() })
             head.addView(sym("\uD83C\uDFB5", ic) {
-                val vs = videos.filter { selected.contains(it.uri.toString()) }
-                Hooks.convert(this, vs.map { it.uri }, vs.map { it.name }) {
+                val chosen = shown.filter { selected.contains(it.uri.toString()) }
+                Hooks.convert(this, chosen.map { it.uri }, chosen.map { it.name }) {
                     dirty = true
                     exitSelect()
                 }
@@ -1205,6 +1207,62 @@ class MainActivity : Activity() {
                 if (selectMode) toggleSel(chosen.uri) else rowMenu(chosen)
             }
             true
+        }
+
+        // Selection gesture: left strip + one finger selects rows while dragging.
+        // Right side remains native one-finger scroll; two-finger scroll is untouched.
+        var dragSelecting = false
+        var lastDragPosition = ListView.INVALID_POSITION
+        lv.setOnTouchListener { view, event ->
+            if (!selectMode || event.pointerCount != 1) {
+                dragSelecting = false
+                lastDragPosition = ListView.INVALID_POSITION
+                false
+            } else {
+                val leftSelectZone = event.x <= view.width * 0.38f
+                when (event.actionMasked) {
+                    MotionEvent.ACTION_DOWN -> {
+                        if (!leftSelectZone) {
+                            dragSelecting = false
+                            false
+                        } else {
+                            dragSelecting = true
+                            lastDragPosition = ListView.INVALID_POSITION
+                            val pos = lv.pointToPosition(event.x.toInt(), event.y.toInt())
+                            if (pos != ListView.INVALID_POSITION) {
+                                val item = items.getOrNull(pos)
+                                if (item != null && !item.tag.startsWith("F:") && item.uri != null) {
+                                    selected.add(item.uri.toString())
+                                    lastDragPosition = pos
+                                    updateSelCount()
+                                }
+                            }
+                            true
+                        }
+                    }
+                    MotionEvent.ACTION_MOVE -> {
+                        if (!dragSelecting) false else {
+                            val pos = lv.pointToPosition(event.x.toInt(), event.y.toInt())
+                            if (pos != ListView.INVALID_POSITION && pos != lastDragPosition) {
+                                val item = items.getOrNull(pos)
+                                if (item != null && !item.tag.startsWith("F:") && item.uri != null) {
+                                    selected.add(item.uri.toString())
+                                    lastDragPosition = pos
+                                    updateSelCount()
+                                }
+                            }
+                            true
+                        }
+                    }
+                    MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                        val wasSelecting = dragSelecting
+                        dragSelecting = false
+                        lastDragPosition = ListView.INVALID_POSITION
+                        wasSelecting
+                    }
+                    else -> dragSelecting
+                }
+            }
         }
         col.addView(lv, LinearLayout.LayoutParams(MP, 0, 1f))
         listHolder.addView(refreshContainer(col, ac), FrameLayout.LayoutParams(MP, MP))
