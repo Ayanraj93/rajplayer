@@ -589,6 +589,17 @@ open class PlayerActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode == 741 && resultCode == RESULT_OK) {
+            val uri = data?.data ?: return
+            try {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: Exception) {}
+            Prefs.setWall(this, uri.toString())
+            Toast.makeText(this, "Custom wallpaper saved", Toast.LENGTH_SHORT).show()
+            return
+        }
+
         if (requestCode != 7 || resultCode != RESULT_OK) return
         val u = data?.data ?: return
         try {
@@ -716,18 +727,6 @@ open class PlayerActivity : Activity() {
         audioModePlayBtn.background = bg
     }
 
-    @Deprecated("Deprecated Android callback retained for compatibility")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == 741 && resultCode == RESULT_OK) {
-            val uri = data?.data ?: return
-            try {
-                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
-            } catch (_: Exception) {}
-            Prefs.setWall(this, uri.toString())
-            Toast.makeText(this, "Custom wallpaper saved", Toast.LENGTH_SHORT).show()
-        }
-    }
 
     override fun onBackPressed() {
         if (audioMode) {
