@@ -79,6 +79,7 @@ class MainActivity : Activity() {
     private var searchOn = false
     private var query = ""
     private var selectMode = false
+    private var gestureGuideShowing = false
     private val selected = LinkedHashSet<String>()
     private val rgbTargets = ArrayList<(Int) -> Unit>()
     private var metaColors = intArrayOf(Color.CYAN, Color.YELLOW, Color.MAGENTA, Color.GREEN)
@@ -212,6 +213,8 @@ class MainActivity : Activity() {
     }
 
     private fun openUri(u: Uri, mime: String?) {
+        Prefs.setAudioModeSession(this, false)
+        AudioActivity.audioModeSession = false
         val t = mime ?: contentResolver.getType(u) ?: ""
         val aud = t.startsWith("audio/") || (t.isEmpty() && looksAudio(u))
         val cls: Class<*> = if (aud) AudioActivity::class.java else Orient.videoClass(this, u)
@@ -518,6 +521,8 @@ class MainActivity : Activity() {
     // ================= play =================
     private fun playList(list: List<V>, index: Int) {
         if (index < 0 || index >= list.size) return
+        Prefs.setAudioModeSession(this, false)
+        AudioActivity.audioModeSession = false
         val cur = list[index]
         val aud = isAudio(cur.uri)
         val q = list.filter { isAudio(it.uri) == aud }
@@ -534,7 +539,8 @@ class MainActivity : Activity() {
 
     private fun openNowPlaying() {
         val cls: Class<*> =
-            if (Engine.isVideo) Orient.videoClass(this, Engine.items.getOrNull(Engine.idx))
+            if (Prefs.audioModeSession(this)) AudioActivity::class.java
+            else if (Engine.isVideo) Orient.videoClass(this, Engine.items.getOrNull(Engine.idx))
             else AudioActivity::class.java
         val i = Intent(this, cls)
         i.data = Engine.items.getOrNull(Engine.idx)
@@ -937,6 +943,44 @@ class MainActivity : Activity() {
         return bar
     }
 
+    private fun showGestureGuideIfNeeded() {
+        if (gestureGuideShowing || !hasPerm()) return
+        val prefs = getSharedPreferences("rajplayer_gesture_guide", MODE_PRIVATE)
+        if (prefs.getBoolean("shown", false)) return
+        gestureGuideShowing = true
+        val message = """
+            VIDEO PLAYER
+            • Single tap: controls + Android bars show
+            • Next single tap: only Android bars hide
+            • Left / Right double tap: seek backward / forward 3 × interval
+            • Centre double tap: show / hide all controls
+
+            AUDIO PLAYER / AUDIO MODE
+            • Double tap empty area: Android bars show / hide
+            • Back arrow / phone Back: return to Video List; playback stays in background
+            • Back to Video: reopen the video player
+
+            MAIN SCREEN
+            • Double tap RajPlayer title: open multiple-video selection for conversion
+        """.trimIndent()
+        AlertDialog.Builder(this)
+            .setTitle("RajPlayer Gesture Guide")
+            .setMessage(message)
+            .setPositiveButton("Got it") { _, _ ->
+                prefs.edit().putBoolean("shown", true).apply()
+                gestureGuideShowing = false
+            }
+            .setNegativeButton("Skip") { _, _ ->
+                prefs.edit().putBoolean("shown", true).apply()
+                gestureGuideShowing = false
+            }
+            .setOnCancelListener {
+                prefs.edit().putBoolean("shown", true).apply()
+                gestureGuideShowing = false
+            }
+            .show()
+    }
+
     // ================= Home =================
     private fun showHome() {
         inSettings = false
@@ -981,6 +1025,17 @@ class MainActivity : Activity() {
             brand.text = "\u26A1 RajPlayer Pro"
             brand.textSize = 22f
             brand.setTypeface(null, Typeface.BOLD)
+            val brandGesture = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+                override fun onDown(e: MotionEvent): Boolean = true
+                override fun onDoubleTap(e: MotionEvent): Boolean {
+                    selectMode = true
+                    selected.clear()
+                    toast("Select videos for multiple conversion")
+                    showHome()
+                    return true
+                }
+            })
+            brand.setOnTouchListener { _, event -> brandGesture.onTouchEvent(event) }
             head.addView(brand, LinearLayout.LayoutParams(0, WC, 1f))
             head.addView(sym("\uD83D\uDD0D", ic) {
                 searchOn = !searchOn
@@ -1059,6 +1114,7 @@ class MainActivity : Activity() {
             dirty = false
             reloadMedia()
         }
+        if (hasPerm()) frame.post { showGestureGuideIfNeeded() }
     }
 
     private fun renderList() {

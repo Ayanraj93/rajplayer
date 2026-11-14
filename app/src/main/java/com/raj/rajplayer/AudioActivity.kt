@@ -61,6 +61,7 @@ class AudioActivity : Activity() {
     private val ui = Handler(Looper.getMainLooper())
     private val pool = Executors.newSingleThreadExecutor()
     private var userSeeking = false
+    private var audioSystemBarsHidden = false
     private var artKey = ""
     private val speeds = floatArrayOf(1f, 1.5f, 2f, 2.5f, 3f, 4f)
     private var speedIdx = 0
@@ -111,6 +112,52 @@ class AudioActivity : Activity() {
         t.setOnClickListener { f(t) }
         rgbTargets.add { c -> t.setTextColor(c) }
         return t
+    }
+
+    @Suppress("DEPRECATION")
+    private fun hideAudioSystemBars() {
+        audioSystemBarsHidden = true
+        window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN
+                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun showAudioSystemBars() {
+        audioSystemBarsHidden = false
+        window.decorView.systemUiVisibility = View.SYSTEM_UI_FLAG_LAYOUT_STABLE
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            if (audioSystemBarsHidden) hideAudioSystemBars() else showAudioSystemBars()
+        }
+    }
+
+    private fun goToVideoList() {
+        // Keep the video/audio session alive; only remove Player/Audio screens from foreground.
+        if (Prefs.audioModeSession(this)) {
+            val i = Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            startActivity(i)
+            finish()
+        } else {
+            finish()
+        }
+    }
+
+    private fun backToVideoPlayer() {
+        val uri = Engine.items.getOrNull(Engine.idx) ?: return
+        Prefs.setAudioModeSession(this, false)
+        audioModeSession = false
+        val i = Intent(this, Orient.videoClass(this, uri))
+        i.data = uri
+        i.putExtra("cont", true)
+        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        startActivity(i)
+        finish()
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -187,14 +234,15 @@ class AudioActivity : Activity() {
         top.gravity = Gravity.CENTER_VERTICAL
         top.setBackgroundColor(bar)
         top.setPadding(dp(4), dp(2), dp(4), dp(2))
-        val backLabel = if (intent.getBooleanExtra("fromVideo", false)) "← Back to Video" else "←"
-        top.addView(ib(backLabel, if (intent.getBooleanExtra("fromVideo", false) || Prefs.audioModeSession(this)) 16f else 24f, ic) {
-            if (Prefs.audioModeSession(this)) {
-                Prefs.setAudioModeSession(this, false)
-                audioModeSession = false
-            }
-            finish()
+        val videoSession = intent.getBooleanExtra("fromVideo", false) || Prefs.audioModeSession(this)
+        top.addView(ib("←", 24f, ic) {
+            goToVideoList()
         })
+        if (videoSession) {
+            top.addView(ib("Back to Video", 15f, ic) {
+                backToVideoPlayer()
+            })
+        }
         val hdr = TextView(this)
         hdr.text = "NOW PLAYING"
         hdr.textSize = 13f
@@ -204,6 +252,8 @@ class AudioActivity : Activity() {
         top.addView(ib("\u2699", 22f, ic) { showStyleCenter() }.also { gearButton = it })
         top.addView(ib("\u22EF", 24f, ic) { menu() })
         top.addView(ib("\u2715", 20f, ic) {
+            Prefs.setAudioModeSession(this, false)
+            audioModeSession = false
             Engine.stopAll(this)
             finish()
         })
@@ -350,6 +400,14 @@ class AudioActivity : Activity() {
         root.addView(col, FrameLayout.LayoutParams(MP, MP))
         if (Prefs.rgbBorder(this)) root.addView(RgbBorderView(this), FrameLayout.LayoutParams(MP, MP))
         setContentView(root)
+        val audioBarsGesture = GestureDetector(this, object : GestureDetector.SimpleOnGestureListener() {
+            override fun onDown(e: MotionEvent): Boolean = true
+            override fun onDoubleTap(e: MotionEvent): Boolean {
+                if (audioSystemBarsHidden) showAudioSystemBars() else hideAudioSystemBars()
+                return true
+            }
+        })
+        root.setOnTouchListener { _, event -> audioBarsGesture.onTouchEvent(event) }
         applyAudioStyle()
 
         // RGB theme: kuch cheezein rang badalti rehti hain
@@ -584,8 +642,8 @@ class AudioActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         if (Prefs.audioModeSession(this)) {
-            Prefs.setAudioModeSession(this, false)
-            audioModeSession = false
+            goToVideoList()
+            return
         }
         super.onBackPressed()
     }

@@ -72,6 +72,7 @@ open class PlayerActivity : Activity() {
     private lateinit var audioModePlayBtn: TextView
     private var audioMode = false
     private var audioChildOpen = false
+    private var systemBarsVisible = false
     private var audioSettingsAnimator: ValueAnimator? = null
     private var playerGearAnimator: ValueAnimator? = null
     private var playerSettingsGear: TextView? = null
@@ -208,6 +209,7 @@ open class PlayerActivity : Activity() {
 
     @Suppress("DEPRECATION")
     private fun hideBars() {
+        systemBarsVisible = false
         window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN
                 or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                 or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
@@ -218,7 +220,9 @@ open class PlayerActivity : Activity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus) hideBars()
+        if (hasFocus) {
+            if (systemBarsVisible) showBars() else hideBars()
+        }
     }
 
     override fun onConfigurationChanged(newConfig: Configuration) {
@@ -236,6 +240,7 @@ open class PlayerActivity : Activity() {
 
     @Suppress("DEPRECATION")
     private fun showBars() {
+        systemBarsVisible = true
         window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
     }
 
@@ -798,7 +803,13 @@ open class PlayerActivity : Activity() {
             override fun onDown(e: MotionEvent): Boolean = true
 
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                if (controlsVisible()) hideControls() else showControls()
+                if (!controlsVisible()) {
+                    showControls() // first tap: controls + Android system bars
+                } else if (systemBarsVisible) {
+                    hideBars() // next tap: hide only Android bars; keep controls visible
+                } else {
+                    showBars()
+                }
                 return true
             }
 
@@ -810,10 +821,14 @@ open class PlayerActivity : Activity() {
                     return true
                 }
                 val w = touchView.width
-                val sMs = (Prefs.seekSec(this@PlayerActivity) * 1000).toLong()
-                if (e.x < w / 3f) seekBy(-sMs)
-                else if (e.x > w * 2f / 3f) seekBy(sMs)
-                else togglePlay()
+                val sMs = (Prefs.seekSec(this@PlayerActivity) * 1000L) * 3L
+                if (e.x < w / 3f) {
+                    seekBy(-sMs)
+                } else if (e.x > w * 2f / 3f) {
+                    seekBy(sMs)
+                } else {
+                    if (controlsVisible()) hideControls() else showControls()
+                }
                 return true
             }
 
@@ -883,6 +898,36 @@ open class PlayerActivity : Activity() {
             }
             true
         }
+    }
+
+    private fun showGestureGuideIfNeeded() {
+        val prefs = getSharedPreferences("rajplayer_gesture_guide", MODE_PRIVATE)
+        if (prefs.getBoolean("shown", false)) return
+        val message = """
+            VIDEO PLAYER GESTURES
+
+            • Single tap: controls + Android bars show
+            • Next single tap: only Android bars hide
+            • Left double tap: seek backward 3 × interval
+            • Right double tap: seek forward 3 × interval
+            • Centre double tap: show / hide all controls
+            • Audio Player / Audio Mode double tap: Android bars show / hide
+
+            Main screen par RajPlayer title double tap: multiple video conversion selection.
+        """.trimIndent()
+        AlertDialog.Builder(this)
+            .setTitle("RajPlayer Gesture Guide")
+            .setMessage(message)
+            .setPositiveButton("Got it") { _, _ ->
+                prefs.edit().putBoolean("shown", true).apply()
+            }
+            .setNegativeButton("Skip") { _, _ ->
+                prefs.edit().putBoolean("shown", true).apply()
+            }
+            .setOnCancelListener {
+                prefs.edit().putBoolean("shown", true).apply()
+            }
+            .show()
     }
 
     // ================= lifecycle =================
@@ -1243,6 +1288,7 @@ open class PlayerActivity : Activity() {
         attachVideo()
         Engine.listener = lis
         setupTouch()
+        showGestureGuideIfNeeded()
 
         if (!cont) layout.post { Engine.setQueue(this, qUris, qNames, qIndex, true) } else onItem()
         showControls()
@@ -1302,9 +1348,10 @@ open class PlayerActivity : Activity() {
             current = null
         }
         ColorGrade.hdrWindow(this, false)
-        if (!Engine.bgAudio && Engine.listener == null) {
+        val keepAudioSession = Prefs.audioModeSession(this)
+        if (!Engine.bgAudio && Engine.listener == null && !keepAudioSession) {
             Engine.stopAll(this)
-        } else if (Engine.bgAudio && Engine.active && Engine.isPlaying()) {
+        } else if (Engine.active && Engine.isPlaying() && (Engine.bgAudio || keepAudioSession)) {
             PlaybackService.start(this)
         }
     }
