@@ -68,6 +68,11 @@ open class PlayerActivity : Activity() {
     private lateinit var playBtn: TextView
     private lateinit var speedBtn: TextView
     private lateinit var audioMgr: AudioManager
+    private lateinit var audioModePanel: LinearLayout
+    private lateinit var audioModeTitle: TextView
+    private lateinit var audioModeSeek: SeekBar
+    private lateinit var audioModePlayBtn: TextView
+    private var audioMode = false
     private var atomic: AtomicView? = null
     private var iconCol = Color.WHITE
     private var slop = 24
@@ -136,6 +141,13 @@ open class PlayerActivity : Activity() {
                 if (abA >= 0 && abB > abA && t >= abB) seekTo(abA)
                 if (!userSeeking) curTv.text = fmt(t)
                 playBtn.text = if (p.isPlaying) "\u23F8" else "\u25B6"
+                if (::audioModeSeek.isInitialized) {
+                    if (!userSeeking && audioMode) {
+                        audioModeSeek.max = len.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+                        audioModeSeek.progress = t.toInt()
+                    }
+                    audioModePlayBtn.text = if (p.isPlaying) "\u23F8" else "\u25B6"
+                }
                 // Media3 handles late-frame dropping against its playback clock. Do not
                 // infer decoder failure from wall-clock position deltas or reload on a seek.
                 val dropsNow = Engine.droppedFrames
@@ -265,6 +277,47 @@ open class PlayerActivity : Activity() {
         atomic?.excludeSurfacesIn(layout)
         current = layout
         layout.post { ColorGrade.apply(this, layout) }
+    }
+
+    private fun enterAudioMode() {
+        if (audioMode) return
+        audioMode = true
+        ui.removeCallbacks(hideRun)
+        mp.detachViews()
+        layout.visibility = View.GONE
+        touchView.visibility = View.GONE
+        topBar.visibility = View.GONE
+        controls.visibility = View.GONE
+        lockBtn.visibility = View.GONE
+        atomic?.visibility = View.GONE
+        audioModeTitle.text = Engine.title
+        audioModePanel.visibility = View.VISIBLE
+        updateAudioMode()
+        hideBars()
+    }
+
+    private fun returnToVideo() {
+        if (!audioMode) return
+        audioMode = false
+        audioModePanel.visibility = View.GONE
+        layout.visibility = View.VISIBLE
+        touchView.visibility = View.VISIBLE
+        atomic?.visibility = View.VISIBLE
+        attachVideo()
+        showControls()
+        hideBars()
+    }
+
+    private fun updateAudioMode() {
+        val p = Engine.mp ?: return
+        audioModeTitle.text = Engine.title
+        val len = p.getLength()
+        val pos = p.getTime()
+        if (!userSeeking && len > 0) {
+            audioModeSeek.max = len.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            audioModeSeek.progress = pos.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+        }
+        audioModePlayBtn.text = if (p.isPlaying) "\u23F8" else "\u25B6"
     }
 
     private fun applyHdrWindow() {
@@ -412,6 +465,10 @@ open class PlayerActivity : Activity() {
         val cu = Engine.cur()
         rate = 1f
         titleTv.text = Engine.title
+        if (audioMode && ::audioModeTitle.isInitialized) {
+            audioModeTitle.text = Engine.title
+            updateAudioMode()
+        }
         startVideoTitleRgbAnimation()
         abA = -1L
         abB = -1L
@@ -617,6 +674,10 @@ open class PlayerActivity : Activity() {
 
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
+        if (audioMode) {
+            returnToVideo()
+            return
+        }
         if (locked) {
             showMsg("Screen is locked. Long-press the lock icon to unlock.")
             return
@@ -845,6 +906,9 @@ open class PlayerActivity : Activity() {
                 else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             showControls()
         })
+        topBar.addView(ib("\uD83C\uDFA7", 20f) {
+            enterAudioMode()
+        })
         root.addView(topBar, FrameLayout.LayoutParams(MP, WC, Gravity.TOP))
 
         // ---- bottom controls ----
@@ -987,6 +1051,63 @@ open class PlayerActivity : Activity() {
         val llp = FrameLayout.LayoutParams(WC, WC, Gravity.START or Gravity.CENTER_VERTICAL)
         llp.setMargins(dp(20), 0, 0, 0)
         root.addView(lockBtn, llp)
+
+        // Audio Mode overlay: same Media3 session, no reload or seek reset.
+        audioModePanel = LinearLayout(this)
+        audioModePanel.orientation = LinearLayout.VERTICAL
+        audioModePanel.gravity = Gravity.CENTER
+        audioModePanel.setPadding(dp(28), dp(24), dp(28), dp(24))
+        audioModePanel.setBackgroundColor(0xFF10131B.toInt())
+
+        val audioHeader = LinearLayout(this)
+        audioHeader.gravity = Gravity.CENTER_VERTICAL
+        val backVideo = ib("\u2190  Back to Video", 17f) { returnToVideo() }
+        audioHeader.addView(backVideo, LinearLayout.LayoutParams(0, WC, 1f))
+        audioModePanel.addView(audioHeader, LinearLayout.LayoutParams(MP, WC))
+
+        val audioIcon = TextView(this)
+        audioIcon.text = "\uD83C\uDFA7"
+        audioIcon.textSize = 76f
+        audioIcon.gravity = Gravity.CENTER
+        audioIcon.setTextColor(Color.WHITE)
+        val iconLp = LinearLayout.LayoutParams(MP, WC)
+        iconLp.setMargins(0, dp(55), 0, dp(28))
+        audioModePanel.addView(audioIcon, iconLp)
+
+        audioModeTitle = TextView(this)
+        audioModeTitle.textSize = 20f
+        audioModeTitle.setTextColor(Color.WHITE)
+        audioModeTitle.gravity = Gravity.CENTER
+        audioModeTitle.maxLines = 2
+        audioModeTitle.ellipsize = TextUtils.TruncateAt.END
+        audioModePanel.addView(audioModeTitle, LinearLayout.LayoutParams(MP, WC))
+
+        audioModeSeek = SeekBar(this)
+        audioModeSeek.progressTintList = ColorStateList.valueOf(ac)
+        audioModeSeek.thumbTintList = ColorStateList.valueOf(ac)
+        audioModeSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
+            override fun onProgressChanged(b: SeekBar?, progress: Int, fromUser: Boolean) {}
+            override fun onStartTrackingTouch(b: SeekBar?) {
+                userSeeking = true
+            }
+            override fun onStopTrackingTouch(b: SeekBar?) {
+                Engine.seekTo((b?.progress ?: 0).toLong())
+                userSeeking = false
+                updateAudioMode()
+            }
+        })
+        val seekLp = LinearLayout.LayoutParams(MP, WC)
+        seekLp.setMargins(0, dp(28), 0, dp(12))
+        audioModePanel.addView(audioModeSeek, seekLp)
+
+        audioModePlayBtn = ib("\u23F8", 34f) { Engine.toggle(this) }
+        val audioPlayLp = LinearLayout.LayoutParams(dp(76), dp(76))
+        audioPlayLp.gravity = Gravity.CENTER
+        audioPlayLp.setMargins(0, dp(18), 0, 0)
+        audioModePanel.addView(audioModePlayBtn, audioPlayLp)
+
+        audioModePanel.visibility = View.GONE
+        root.addView(audioModePanel, FrameLayout.LayoutParams(MP, MP))
 
         setContentView(root)
         padForCutout()
