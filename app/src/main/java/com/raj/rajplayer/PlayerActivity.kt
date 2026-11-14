@@ -71,7 +71,20 @@ open class PlayerActivity : Activity() {
     private lateinit var audioModeSeek: SeekBar
     private lateinit var audioModePlayBtn: TextView
     private var audioMode = false
+    private var audioChildOpen = false
     private var audioSettingsAnimator: ValueAnimator? = null
+    private var playerGearAnimator: ValueAnimator? = null
+    private var playerSettingsGear: TextView? = null
+    private val controlRgbTargets = ArrayList<(Int) -> Unit>()
+    private val controlRgbTick = object : Runnable {
+        override fun run() {
+            if (controlRgbTargets.isNotEmpty()) {
+                val c = Theme.rgbNow(0f)
+                controlRgbTargets.forEach { it(c) }
+                ui.postDelayed(this, 70L)
+            }
+        }
+    }
     private var atomic: AtomicView? = null
     private var iconCol = Color.WHITE
     private var slop = 24
@@ -187,6 +200,9 @@ open class PlayerActivity : Activity() {
         t.gravity = Gravity.CENTER
         t.setPadding(dp(10), dp(8), dp(10), dp(8))
         t.setOnClickListener { f(t) }
+        if (Prefs.themeMode(this) == "rgb" && !Prefs.hasOverride(this, Prefs.K_ICON)) {
+            controlRgbTargets.add { c -> t.setTextColor(c) }
+        }
         return t
     }
 
@@ -218,7 +234,13 @@ open class PlayerActivity : Activity() {
         ui.postDelayed(hideMsg, 900)
     }
 
+    @Suppress("DEPRECATION")
+    private fun showBars() {
+        window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
+    }
+
     private fun showControls() {
+        showBars()
         if (locked) {
             lockBtn.visibility = View.VISIBLE
         } else {
@@ -227,10 +249,11 @@ open class PlayerActivity : Activity() {
             lockBtn.visibility = View.VISIBLE
         }
         ui.removeCallbacks(hideRun)
-        ui.postDelayed(hideRun, 4000)
+        ui.postDelayed(hideRun, 2600)
     }
 
     private fun hideControls() {
+        hideBars()
         topBar.visibility = View.GONE
         controls.visibility = View.GONE
         lockBtn.visibility = View.GONE
@@ -279,20 +302,18 @@ open class PlayerActivity : Activity() {
     }
 
     private fun enterAudioMode() {
-        if (audioMode) return
-        audioMode = true
+        if (audioChildOpen || !Engine.active) return
+        audioChildOpen = true
         ui.removeCallbacks(hideRun)
-        mp.detachViews()
-        layout.visibility = View.GONE
-        touchView.visibility = View.GONE
-        topBar.visibility = View.GONE
-        controls.visibility = View.GONE
-        lockBtn.visibility = View.GONE
-        atomic?.visibility = View.GONE
-        audioModeTitle.text = Engine.title
-        audioModePanel.visibility = View.VISIBLE
-        updateAudioMode()
-        hideBars()
+        try {
+            val i = Intent(this, AudioActivity::class.java)
+                .putExtra("cont", true)
+                .putExtra("fromVideo", true)
+            startActivity(i)
+        } catch (e: Exception) {
+            audioChildOpen = false
+            Toast.makeText(this, "Audio Player open nahi hua: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 
     private fun returnToVideo() {
@@ -1078,7 +1099,7 @@ open class PlayerActivity : Activity() {
         exRow.addView(ib("Sub", 14f) {
             pickTrack("Subtitles", mp.getSpuTracks()) { id -> mp.setSpuTrack(id) }
         })
-        exRow.addView(ib("\u2699\uFE0F", 18f) { showMenu() })
+        exRow.addView(ib("\u2699\uFE0F", 18f) { showMenu() }.also { playerSettingsGear = it })
         controls.addView(exRow)
         root.addView(controls, FrameLayout.LayoutParams(MP, WC, Gravity.BOTTOM))
 
@@ -1230,11 +1251,30 @@ open class PlayerActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        PlaybackService.stop(this)
+        audioChildOpen = false
+        Engine.listener = lis
+        if (Engine.active && Engine.isPlaying()) PlaybackService.start(this) else PlaybackService.stop(this)
+        ui.removeCallbacks(controlRgbTick)
+        if (controlRgbTargets.isNotEmpty()) ui.post(controlRgbTick)
+        playerGearAnimator?.cancel()
+        playerSettingsGear?.let { gear ->
+            if (Prefs.themeMode(this) == "rgb") {
+                playerGearAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
+                    duration = 5000L
+                    repeatCount = ValueAnimator.INFINITE
+                    interpolator = LinearInterpolator()
+                    addUpdateListener { gear.rotation = it.animatedValue as Float }
+                    start()
+                }
+            }
+        }
         hideBars()
     }
 
     override fun onPause() {
+        playerGearAnimator?.cancel()
+        playerGearAnimator = null
+        ui.removeCallbacks(controlRgbTick)
         super.onPause()
         Engine.saveProgress()
         if (Engine.bgAudio && Engine.isPlaying()) PlaybackService.start(this)
@@ -1242,7 +1282,7 @@ open class PlayerActivity : Activity() {
 
     override fun onStop() {
         super.onStop()
-        if (Engine.isPlaying() && !Engine.bgAudio) {
+        if (Engine.isPlaying() && !Engine.bgAudio && !audioChildOpen) {
             Engine.pause()
         }
     }

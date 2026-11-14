@@ -16,7 +16,22 @@ class RgbTextView(ctx: Context) : TextView(ctx) {
     private var period = 1f
     private var shift = 0f
     private var running = false
+    private var solidMode = false
     private var last = 0L
+
+    fun setSolidColor(color: Int) {
+        solidMode = true
+        sh = null
+        paint.shader = null
+        setTextColor(color)
+        invalidate()
+    }
+
+    fun useRgbColors() {
+        solidMode = false
+        sh = null
+        invalidate()
+    }
 
     private val cols = intArrayOf(
         0xFFFF1744.toInt(), 0xFFFF9100.toInt(), 0xFFFFEA00.toInt(), 0xFF00E676.toInt(),
@@ -65,6 +80,11 @@ class RgbTextView(ctx: Context) : TextView(ctx) {
     }
 
     override fun onDraw(canvas: Canvas) {
+        if (solidMode) {
+            paint.shader = null
+            super.onDraw(canvas)
+            return
+        }
         var s = sh
         if (s == null) {
             period = paint.measureText(text.toString()).coerceAtLeast(1f)

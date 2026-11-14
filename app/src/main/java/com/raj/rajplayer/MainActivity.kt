@@ -48,7 +48,7 @@ class MainActivity : Activity() {
 
     data class V(val name: String, val uri: Uri, val dur: Long, val size: Long, val folder: String, val date: Long, val w: Int, val h: Int)
     data class Item(val title: String, val sub: String, val uri: Uri?, val badge: String, val tag: String, val res: String)
-    class H(val check: TextView, val thumb: ImageView, val badge: TextView, val title: TextView, val sub: TextView, val info: TextView)
+    class H(val check: TextView, val thumb: ImageView, val badge: TextView, val title: RgbTextView, val sub: TextView, val info: TextView)
 
     private val MP = ViewGroup.LayoutParams.MATCH_PARENT
     private val WC = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -339,9 +339,32 @@ class MainActivity : Activity() {
         return if (hh > 0) String.format("%d:%02d:%02d", hh, mm, ss) else String.format("%d:%02d", mm, ss)
     }
 
-    private fun sizeStr(b: Long): String =
-        if (b >= 1073741824L) String.format("%.1f GB", b / 1073741824.0)
-        else String.format("%.0f MB", b / 1048576.0)
+    // Audio-only size label. Keep sizeStr() unchanged so Video List appearance stays identical.
+    private fun audioSizeStr(b: Long): String = when {
+        b <= 0L -> "0 B"
+        b < 1024L -> "$b B"
+        b < 1048576L -> String.format("%.1f KB", b / 1024.0)
+        b < 1073741824L -> String.format("%.1f MB", b / 1048576.0)
+        else -> String.format("%.1f GB", b / 1073741824.0)
+    }
+
+    private fun audioFormat(name: String): String {
+        val ext = name.substringAfterLast('.', "").uppercase()
+        return if (ext.isBlank()) "AUDIO" else ext
+    }
+
+    private fun videoSizeStr(b: Long): String = when {
+        b <= 0L -> "0 B"
+        b < 1024L -> "$b B"
+        b < 1048576L -> String.format("%.1f KB", b / 1024.0)
+        b < 1073741824L -> String.format("%.1f MB", b / 1048576.0)
+        else -> String.format("%.1f GB", b / 1073741824.0)
+    }
+
+    private fun videoFormat(name: String): String {
+        val ext = name.substringAfterLast('.', "").uppercase()
+        return if (ext.isBlank()) "VIDEO" else ext
+    }
 
     private fun folderName(p: String): String {
         val s = p.trim('/').split('/').lastOrNull() ?: ""
@@ -352,7 +375,7 @@ class MainActivity : Activity() {
         val res = if (isAudio(v.uri) || v.w <= 0 || v.h <= 0) "" else VideoInfo.listResLabel(v.w, v.h)
         val folder = v.folder.trim('/').ifEmpty { "Internal Storage" }
         val sub = if (isAudio(v.uri)) {
-            folder + " \u2022 " + sizeStr(v.size)
+            folder + " \u2022 " + audioFormat(v.name) + " \u2022 " + audioSizeStr(v.size)
         } else {
             folder + "\nSize: " + sizeStr(v.size)
         }
@@ -416,7 +439,18 @@ class MainActivity : Activity() {
                 )
             }
         }
-        return sortList(out)
+        // MediaStore can expose duplicate audio rows for the same file (often one stale 0-byte row).
+        // Filename includes the extension, so MP3 and M4A versions remain separate entries.
+        val unique = if (video) out else out
+            .groupBy { (it.folder.trim('/') + "/" + it.name).lowercase(java.util.Locale.ROOT) }
+            .values
+            .map { copies -> copies.maxWithOrNull(
+                compareBy<V> { it.size > 0L }
+                    .thenBy { it.size }
+                    .thenBy { it.dur }
+                    .thenBy { it.date }
+            ) ?: copies.first() }
+        return sortList(unique)
     }
 
     private fun sortList(l: List<V>): List<V> {
@@ -723,7 +757,18 @@ class MainActivity : Activity() {
         return Pair(row, H(check, thumb, badge, title, sub, info))
     }
 
-    private fun makeAdapter(items: List<Item>, tc: Int, ac: Int): BaseAdapter = object : BaseAdapter() {
+    private fun makeAdapter(items: List<Item>, tc: Int, ac: Int): BaseAdapter {
+        val audioSolidPalette = intArrayOf(
+            0xFFFF6B6B.toInt(), 0xFFFFA94D.toInt(), 0xFFFFD43B.toInt(), 0xFF69DB7C.toInt(),
+            0xFF38D9A9.toInt(), 0xFF3BC9DB.toInt(), 0xFF4DABF7.toInt(), 0xFF748FFC.toInt(),
+            0xFF9775FA.toInt(), 0xFFDA77F2.toInt(), 0xFFF06595.toInt(), 0xFFFF8787.toInt(),
+            0xFF20C997.toInt(), 0xFF15AABF.toInt(), 0xFF339AF0.toInt(), 0xFF5C7CFA.toInt(),
+            0xFF845EF7.toInt(), 0xFFCC5DE8.toInt(), 0xFFE64980.toInt(), 0xFFFF922B.toInt(),
+            0xFF82C91E.toInt(), 0xFF12B886.toInt(), 0xFF0CA678.toInt(), 0xFF1098AD.toInt(),
+            0xFF228BE6.toInt(), 0xFF4263EB.toInt(), 0xFF6741D9.toInt(), 0xFF9C36B5.toInt(),
+            0xFFD6336C.toInt(), 0xFFE8590C.toInt(), 0xFF66A80F.toInt(), 0xFF099268.toInt()
+        ).filter { !metaColors.contains(it) }.shuffled()
+        return object : BaseAdapter() {
         override fun getCount(): Int = items.size
         override fun getItem(position: Int): Any = items[position]
         override fun getItemId(position: Int): Long = position.toLong()
@@ -745,7 +790,12 @@ class MainActivity : Activity() {
             val isLast = !isFolder && u != null && u.toString() == Prefs.lastPlayedUri(this@MainActivity)
             v.setBackgroundColor(if (isLast) (ac and 0x00FFFFFF) or 0x33000000 else Color.TRANSPARENT)
             holder.title.text = (if (isLast) "\u25B6 " else "") + item.title
-            holder.title.setTextColor(if (isLast) ac else tc)
+            if (u != null && isAudio(u)) {
+                holder.title.setSolidColor(audioSolidPalette[position % audioSolidPalette.size])
+            } else {
+                holder.title.useRgbColors()
+                holder.title.setTextColor(if (isLast) ac else tc)
+            }
             if (u != null && !isFolder && !isAudio(u)) {
                 val subText = android.text.SpannableString(item.sub)
                 val pathEnd = item.sub.indexOf('\n').let { if (it < 0) item.sub.length else it }
@@ -838,6 +888,7 @@ class MainActivity : Activity() {
             }
             return v
         }
+    }
     }
 
     // ================= mini player =================

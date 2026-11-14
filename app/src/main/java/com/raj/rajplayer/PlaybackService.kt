@@ -145,7 +145,8 @@ class PlaybackService : Service() {
     }
 
     private fun openPi(): PendingIntent {
-        val cls: Class<*> = if (Engine.isVideo) Orient.videoClass(this, Engine.items.getOrNull(Engine.idx)) else AudioActivity::class.java
+        val cls: Class<*> = if (AudioActivity.visible || AudioActivity.audioModeSession || Prefs.audioModeSession(this) || !Engine.isVideo) AudioActivity::class.java
+            else Orient.videoClass(this, Engine.items.getOrNull(Engine.idx))
         val i = Intent(this, cls)
         i.data = Engine.items.getOrNull(Engine.idx)
         i.putExtra("cont", true)

@@ -1,6 +1,9 @@
 package com.raj.rajplayer
 
 import android.app.Activity
+import android.animation.ValueAnimator
+import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.app.AlertDialog
 import android.content.res.ColorStateList
 import android.graphics.Bitmap
@@ -18,6 +21,7 @@ import android.view.Gravity
 import android.view.View
 import android.view.ViewGroup
 import android.view.ViewOutlineProvider
+import android.view.animation.LinearInterpolator
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
@@ -26,6 +30,11 @@ import android.widget.TextView
 import java.util.concurrent.Executors
 
 class AudioActivity : Activity() {
+
+    companion object {
+        @Volatile var visible: Boolean = false
+        @Volatile var audioModeSession: Boolean = false
+    }
 
     private val MP = ViewGroup.LayoutParams.MATCH_PARENT
     private val WC = ViewGroup.LayoutParams.WRAP_CONTENT
@@ -41,6 +50,13 @@ class AudioActivity : Activity() {
     private lateinit var repBtn: TextView
     private lateinit var artImg: ImageView
     private lateinit var artNote: TextView
+    private lateinit var rootView: FrameLayout
+    private lateinit var gearButton: TextView
+    private lateinit var topBarView: LinearLayout
+    private lateinit var playCircle: GradientDrawable
+    private var gearAnimator: ValueAnimator? = null
+    private var wallView: ImageView? = null
+    private var wallDim: View? = null
 
     private val ui = Handler(Looper.getMainLooper())
     private val pool = Executors.newSingleThreadExecutor()
@@ -93,12 +109,22 @@ class AudioActivity : Activity() {
         t.gravity = Gravity.CENTER
         t.setPadding(dp(12), dp(8), dp(12), dp(8))
         t.setOnClickListener { f(t) }
+        rgbTargets.add { c -> t.setTextColor(c) }
         return t
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val cont = intent.getBooleanExtra("cont", false) && Engine.active && !Engine.isVideo
+        requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        if (intent.getBooleanExtra("fromVideo", false)) {
+            audioModeSession = true
+            Prefs.setAudioModeSession(this, true)
+        }
+        val cont = intent.getBooleanExtra("cont", false) && Engine.active
+        if (!cont && Engine.isVideo) {
+            audioModeSession = false
+            Prefs.setAudioModeSession(this, false)
+        }
         var uris: List<Uri> = emptyList()
         var names: List<String> = emptyList()
         var index = 0
@@ -115,17 +141,18 @@ class AudioActivity : Activity() {
             index = intent.getIntExtra("idx", 0)
         }
 
-        val tc = Prefs.audioTextColor(this)
-        val ic = Prefs.iconColor(this)
-        val ac = Prefs.accent(this)
-        val bar = Prefs.audioBarColor(this)
-        val rgb = Prefs.themeMode(this) == "rgb"
-        val rgbAcc = rgb && !Prefs.hasOverride(this, Prefs.K_ACCENT)
-        val rgbTxt = rgb && !Prefs.hasOverride(this, Prefs.K_ATEXT)
+        val tc = audioTextColor()
+        val ic = audioIconColor()
+        val ac = audioAccent()
+        val bar = audioBarColor()
+        val rgb = audioRgbEnabled()
+        val rgbAcc = rgb
+        val rgbTxt = rgb
 
         val root = FrameLayout(this)
-        root.setBackgroundColor(Prefs.bg(this))
-        val w = Prefs.wall(this)
+        rootView = root
+        root.setBackgroundColor(audioPalette(Prefs.audioTheme(this))[0])
+        val w = Prefs.audioWall(this)
         if (w != null) {
             try {
                 val iv = ImageView(this)
@@ -135,6 +162,8 @@ class AudioActivity : Activity() {
                 val dim = View(this)
                 dim.setBackgroundColor(0xBB000000.toInt())
                 root.addView(dim, FrameLayout.LayoutParams(MP, MP))
+                wallView = iv
+                wallDim = dim
             } catch (e: Exception) {
             }
         }
@@ -154,16 +183,25 @@ class AudioActivity : Activity() {
 
         // ---- top row (audio title bar) ----
         val top = LinearLayout(this)
+        topBarView = top
         top.gravity = Gravity.CENTER_VERTICAL
         top.setBackgroundColor(bar)
         top.setPadding(dp(4), dp(2), dp(4), dp(2))
-        top.addView(ib("\u2190", 24f, ic) { finish() })
+        val backLabel = if (intent.getBooleanExtra("fromVideo", false)) "← Back to Video" else "←"
+        top.addView(ib(backLabel, if (intent.getBooleanExtra("fromVideo", false) || Prefs.audioModeSession(this)) 16f else 24f, ic) {
+            if (Prefs.audioModeSession(this)) {
+                Prefs.setAudioModeSession(this, false)
+                audioModeSession = false
+            }
+            finish()
+        })
         val hdr = TextView(this)
         hdr.text = "NOW PLAYING"
         hdr.textSize = 13f
         hdr.setTextColor(tc)
         hdr.gravity = Gravity.CENTER
         top.addView(hdr, LinearLayout.LayoutParams(0, WC, 1f))
+        top.addView(ib("\u2699", 22f, ic) { showStyleCenter() }.also { gearButton = it })
         top.addView(ib("\u22EF", 24f, ic) { menu() })
         top.addView(ib("\u2715", 20f, ic) {
             Engine.stopAll(this)
@@ -258,10 +296,10 @@ class AudioActivity : Activity() {
         tr.addView(shufBtn)
         tr.addView(ib("\u23EE", 30f, ic) { Engine.prev(this) })
         playBtn = ib("\u23F8", 30f, contrast(ac)) { Engine.toggle(this) }
-        val circle = GradientDrawable()
-        circle.shape = GradientDrawable.OVAL
-        circle.setColor(ac)
-        playBtn.background = circle
+        playCircle = GradientDrawable()
+        playCircle.shape = GradientDrawable.OVAL
+        playCircle.setColor(ac)
+        playBtn.background = playCircle
         val plp = LinearLayout.LayoutParams(dp(72), dp(72))
         plp.setMargins(dp(12), 0, dp(12), 0)
         tr.addView(playBtn, plp)
@@ -299,19 +337,28 @@ class AudioActivity : Activity() {
         ex.addView(ib("Queue", 14f, ic) { queueDialog() })
         col.addView(ex, LinearLayout.LayoutParams(MP, WC))
 
+        val actionRow = LinearLayout(this)
+        actionRow.gravity = Gravity.CENTER
+        actionRow.setPadding(0, dp(8), 0, 0)
+        actionRow.addView(ib("Convert to Audio", 14f, ic) {
+            val u = Engine.items.getOrNull(Engine.idx) ?: return@ib
+            Hooks.convert(this, listOf(u), listOf(Engine.title), null)
+        })
+        actionRow.addView(ib("Style Center", 14f, ic) { showStyleCenter() })
+        col.addView(actionRow, LinearLayout.LayoutParams(MP, WC))
+
         root.addView(col, FrameLayout.LayoutParams(MP, MP))
         if (Prefs.rgbBorder(this)) root.addView(RgbBorderView(this), FrameLayout.LayoutParams(MP, MP))
         setContentView(root)
+        applyAudioStyle()
 
         // RGB theme: kuch cheezein rang badalti rehti hain
-        if (rgbAcc) {
-            rgbTargets.add { c ->
-                seek.progressTintList = ColorStateList.valueOf(c)
-                seek.thumbTintList = ColorStateList.valueOf(c)
-            }
-            rgbTargets.add { c -> g.setColors(intArrayOf(c, 0xFF000000.toInt())) }
+        rgbTargets.add { c ->
+            seek.progressTintList = ColorStateList.valueOf(c)
+            seek.thumbTintList = ColorStateList.valueOf(c)
         }
-        if (rgbTxt) rgbTargets.add { c -> titleTv.setTextColor(c) }
+        rgbTargets.add { c -> g.setColors(intArrayOf(c, 0xFF000000.toInt())) }
+        rgbTargets.add { c -> titleTv.setTextColor(c) }
 
         Engine.listener = lis
         if (!cont) Engine.setQueue(this, uris, names, index, false)
@@ -380,6 +427,94 @@ class AudioActivity : Activity() {
         playBtn.text = if (p.isPlaying) "\u23F8" else "\u25B6"
     }
 
+    private fun audioPalette(theme: String): IntArray = when (theme) {
+        "nature" -> intArrayOf(0xFF071B12.toInt(), 0xFF19C37D.toInt(), 0xFFE9FFF4.toInt(), 0xFF0B3828.toInt())
+        "neon" -> intArrayOf(0xFF090817.toInt(), 0xFF00E5FF.toInt(), 0xFFF5F0FF.toInt(), 0xFF21113F.toInt())
+        "vinyl" -> intArrayOf(0xFF21090B.toInt(), 0xFFFF5A36.toInt(), 0xFFFFF0E8.toInt(), 0xFF3B1015.toInt())
+        "synthwave" -> intArrayOf(0xFF100820.toInt(), 0xFFFF36B7.toInt(), 0xFFFFF1FF.toInt(), 0xFF281044.toInt())
+        "aurora" -> intArrayOf(0xFF061522.toInt(), 0xFF45E0C1.toInt(), 0xFFE8FFFF.toInt(), 0xFF0A3040.toInt())
+        else -> intArrayOf(Prefs.bg(this), Prefs.accent(this), Prefs.audioTextColor(this), Prefs.audioBarColor(this))
+    }
+
+    private fun audioAccent() = audioPalette(Prefs.audioTheme(this))[1]
+    private fun audioTextColor() = audioPalette(Prefs.audioTheme(this))[2]
+    private fun audioIconColor() = audioTextColor()
+    private fun audioBarColor() = audioPalette(Prefs.audioTheme(this))[3]
+    private fun audioRgbEnabled() = Prefs.audioTheme(this) == "neon" || Prefs.audioTheme(this) == "synthwave" || Prefs.themeMode(this) == "rgb"
+
+    private fun showStyleCenter() {
+        val labels = arrayOf(
+            if (Prefs.audioTheme(this) == "basic") "✓ Basic (Default)" else "Basic (Default)",
+            "Nature Glass", "Neon Pulse", "Vinyl Classic", "Synthwave", "Aurora",
+            "Choose Audio Wallpaper", "Remove Audio Wallpaper", "Reset Audio Style"
+        )
+        AlertDialog.Builder(this).setTitle("Audio Style Center").setItems(labels) { _, which ->
+            when (which) {
+                0 -> { Prefs.setAudioTheme(this, "basic"); applyAudioStyle() }
+                1 -> { Prefs.setAudioTheme(this, "nature"); applyAudioStyle() }
+                2 -> { Prefs.setAudioTheme(this, "neon"); applyAudioStyle() }
+                3 -> { Prefs.setAudioTheme(this, "vinyl"); applyAudioStyle() }
+                4 -> { Prefs.setAudioTheme(this, "synthwave"); applyAudioStyle() }
+                5 -> { Prefs.setAudioTheme(this, "aurora"); applyAudioStyle() }
+                6 -> {
+                    val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).apply { addCategory(Intent.CATEGORY_OPENABLE); type = "image/*" }
+                    try { startActivityForResult(pick, 741) }
+                    catch (_: Exception) { android.widget.Toast.makeText(this, "Image picker unavailable", android.widget.Toast.LENGTH_SHORT).show() }
+                }
+                7 -> { Prefs.setAudioWall(this, null); applyAudioStyle() }
+                8 -> { Prefs.setAudioTheme(this, "basic"); Prefs.setAudioWall(this, null); applyAudioStyle() }
+            }
+        }.show()
+    }
+
+    private fun applyAudioStyle() {
+        val palette = audioPalette(Prefs.audioTheme(this))
+        val accent = palette[1]
+        val text = palette[2]
+        if (Prefs.audioTheme(this) == "basic") {
+            rootView.setBackgroundColor(palette[0])
+        } else {
+            rootView.background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(palette[0], palette[3], 0xFF05060B.toInt())
+            )
+        }
+        topBarView.setBackgroundColor(palette[3])
+        titleTv.setTextColor(text)
+        subTv.setTextColor(text)
+        curTv.setTextColor(text)
+        durTv.setTextColor(text)
+        seek.progressTintList = ColorStateList.valueOf(accent)
+        seek.thumbTintList = ColorStateList.valueOf(accent)
+        playCircle.setColor(accent)
+        wallView?.let { rootView.removeView(it) }
+        wallDim?.let { rootView.removeView(it) }
+        wallView = null
+        wallDim = null
+        ui.removeCallbacks(rgbTick)
+        if (audioRgbEnabled() && rgbTargets.isNotEmpty()) ui.post(rgbTick)
+        val wall = Prefs.audioWall(this)
+        if (!wall.isNullOrEmpty()) try {
+            val iv = ImageView(this).apply { scaleType = ImageView.ScaleType.CENTER_CROP; setImageURI(Uri.parse(wall)) }
+            val dim = View(this).apply { setBackgroundColor(0x99000000.toInt()) }
+            rootView.addView(iv, 0, FrameLayout.LayoutParams(MP, MP))
+            rootView.addView(dim, 1, FrameLayout.LayoutParams(MP, MP))
+            wallView = iv
+            wallDim = dim
+        } catch (_: Exception) { }
+    }
+
+    @Deprecated("Deprecated in Java")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 741 && resultCode == RESULT_OK) {
+            val uri = data?.data ?: return
+            try { contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION) } catch (_: Exception) { }
+            Prefs.setAudioWall(this, uri.toString())
+            applyAudioStyle()
+        }
+    }
+
     private fun menu() {
         val opts = arrayOf(
             "Equalizer",
@@ -421,19 +556,44 @@ class AudioActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        visible = true
+        if (Engine.active && Engine.isPlaying()) PlaybackService.start(this)
+        gearAnimator?.cancel()
+        gearAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
+            duration = 5000L
+            repeatCount = ValueAnimator.INFINITE
+            interpolator = LinearInterpolator()
+            addUpdateListener { gearButton.rotation = it.animatedValue as Float }
+            start()
+        }
         ui.post(tick)
         ui.removeCallbacks(rgbTick)
-        if (rgbTargets.isNotEmpty()) ui.post(rgbTick)
+        if (rgbTargets.isNotEmpty() && audioRgbEnabled()) ui.post(rgbTick)
         if (Engine.active) onItem()
     }
 
     override fun onPause() {
+        visible = false
+        gearAnimator?.cancel()
+        gearAnimator = null
         super.onPause()
         ui.removeCallbacks(tick)
         ui.removeCallbacks(rgbTick)
     }
 
+    @Deprecated("Deprecated in Java")
+    override fun onBackPressed() {
+        if (Prefs.audioModeSession(this)) {
+            Prefs.setAudioModeSession(this, false)
+            audioModeSession = false
+        }
+        super.onBackPressed()
+    }
+
     override fun onDestroy() {
+        visible = false
+        // Keep the persisted session flag while background audio continues; Back to Video clears it.
+        gearAnimator?.cancel()
         super.onDestroy()
         ui.removeCallbacksAndMessages(null)
         if (Engine.listener === lis) Engine.listener = null

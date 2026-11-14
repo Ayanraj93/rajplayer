@@ -124,6 +124,14 @@ object Prefs {
     fun wall(c: Context): String? = p(c).getString("wall", null)
     fun setWall(c: Context, v: String?) { p(c).edit().putString("wall", v).apply() }
 
+    // Audio Player appearance is isolated from Video List and Music List appearance.
+    fun audioWall(c: Context): String? = p(c).getString("audio_wall", null)
+    fun setAudioWall(c: Context, v: String?) { p(c).edit().putString("audio_wall", v).apply() }
+    fun audioTheme(c: Context): String = p(c).getString("audio_theme", "basic") ?: "basic"
+    fun setAudioTheme(c: Context, v: String) { p(c).edit().putString("audio_theme", v).apply() }
+    fun audioModeSession(c: Context): Boolean = p(c).getBoolean("audio_mode_session", false)
+    fun setAudioModeSession(c: Context, v: Boolean) { p(c).edit().putBoolean("audio_mode_session", v).apply() }
+
     fun pos(c: Context, key: String): Long = p(c).getLong("pos_" + key, 0L)
     fun setPos(c: Context, key: String, v: Long) {
         val e = p(c).edit()
