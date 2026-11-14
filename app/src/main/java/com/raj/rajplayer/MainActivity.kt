@@ -339,6 +339,15 @@ class MainActivity : Activity() {
         return if (hh > 0) String.format("%d:%02d:%02d", hh, mm, ss) else String.format("%d:%02d", mm, ss)
     }
 
+    // Video List file size: B / KB / MB / GB.
+    private fun sizeStr(b: Long): String = when {
+        b <= 0L -> "0 B"
+        b < 1024L -> "$b B"
+        b < 1048576L -> String.format("%.1f KB", b / 1024.0)
+        b < 1073741824L -> String.format("%.1f MB", b / 1048576.0)
+        else -> String.format("%.1f GB", b / 1073741824.0)
+    }
+
     // Audio-only size label. Keep sizeStr() unchanged so Video List appearance stays identical.
     private fun audioSizeStr(b: Long): String = when {
         b <= 0L -> "0 B"
