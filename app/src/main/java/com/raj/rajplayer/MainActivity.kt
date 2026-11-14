@@ -599,7 +599,13 @@ class MainActivity : Activity() {
         val v = shown.firstOrNull { it.uri == u } ?: return
         val fav = Prefs.isFav(this, u.toString())
         val aud = isAudio(u)
-        val opts = arrayOf(
+        val opts = if (aud) arrayOf(
+            "Details / Info",
+            "Select (tick)",
+            "Play",
+            if (fav) "Remove from Playlist" else "Add to Playlist",
+            "Delete"
+        ) else arrayOf(
             "Details / Info",
             "Select (tick)",
             "Play",
@@ -623,7 +629,13 @@ class MainActivity : Activity() {
                         toast(if (added) "Added to Playlist" else "Removed from Playlist")
                         if (tab == 3) showHome()
                     }
-                    4 -> if (aud) toast("Only for videos") else Hooks.convert(this, listOf(u), listOf(v.name), null)
+                    4 -> if (aud) {
+                        selected.clear()
+                        selected.add(u.toString())
+                        confirmDelete()
+                    } else {
+                        Hooks.convert(this, listOf(u), listOf(v.name), null)
+                    }
                     5 -> {
                         selected.clear()
                         selected.add(u.toString())

@@ -14,6 +14,8 @@ namespace {
 struct EncoderState {
     lame_global_flags* flags = nullptr;
     int channels = 2;
+    std::vector<short> samples;
+    std::vector<unsigned char> encoded;
 };
 
 EncoderState* stateFrom(jlong handle) {
@@ -92,28 +94,28 @@ Java_com_raj_rajplayer_Mp3Native_nativeEncode(
         return nullptr;
     }
 
-    std::vector<short> samples(static_cast<size_t>(expected));
-    env->GetShortArrayRegion(pcm, 0, expected, samples.data());
+    state->samples.resize(static_cast<size_t>(expected));
+    env->GetShortArrayRegion(pcm, 0, expected, state->samples.data());
     if (env->ExceptionCheck()) return nullptr;
 
     const size_t capacity = static_cast<size_t>(1.25 * samplesPerChannel + 7200);
-    std::vector<unsigned char> encoded(capacity);
+    state->encoded.resize(capacity);
     int written = 0;
     if (state->channels == 1) {
         written = lame_encode_buffer(
-            state->flags, samples.data(), samples.data(), samplesPerChannel,
-            encoded.data(), static_cast<int>(encoded.size()));
+            state->flags, state->samples.data(), state->samples.data(), samplesPerChannel,
+            state->encoded.data(), static_cast<int>(state->encoded.size()));
     } else {
         written = lame_encode_buffer_interleaved(
-            state->flags, samples.data(), samplesPerChannel,
-            encoded.data(), static_cast<int>(encoded.size()));
+            state->flags, state->samples.data(), samplesPerChannel,
+            state->encoded.data(), static_cast<int>(state->encoded.size()));
     }
 
     if (written < 0) {
         throwIllegalState(env, "LAME failed while encoding PCM samples");
         return nullptr;
     }
-    return toByteArray(env, encoded, written);
+    return toByteArray(env, state->encoded, written);
 }
 
 extern "C" JNIEXPORT jbyteArray JNICALL

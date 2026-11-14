@@ -284,6 +284,7 @@ object Hooks {
                 var inputEos = false
                 var outputEos = false
                 var outputFormatReady = false
+                var pcmBuffer = ShortArray(0)
 
                 while (!outputEos) {
                     if (cancelled.get()) throw InterruptedException("Conversion cancelled")
@@ -355,12 +356,14 @@ object Hooks {
                                 buffer.limit(info.offset + info.size)
                                 buffer.order(java.nio.ByteOrder.LITTLE_ENDIAN)
                                 val shortCount = buffer.remaining() / 2
-                                val pcm = ShortArray(shortCount)
-                                for (i in 0 until shortCount) pcm[i] = buffer.short
+                                if (pcmBuffer.size < shortCount) {
+                                    pcmBuffer = ShortArray(shortCount)
+                                }
+                                for (i in 0 until shortCount) pcmBuffer[i] = buffer.short
                                 val channels = decoder.outputFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT)
                                 val samplesPerChannel = shortCount / channels
                                 if (samplesPerChannel > 0) {
-                                    val encoded = Mp3Native.nativeEncode(lameHandle, pcm, samplesPerChannel)
+                                    val encoded = Mp3Native.nativeEncode(lameHandle, pcmBuffer, samplesPerChannel)
                                     if (encoded.isNotEmpty()) output.write(encoded)
                                 }
                             }
