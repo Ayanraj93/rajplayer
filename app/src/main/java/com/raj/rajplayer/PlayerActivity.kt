@@ -43,8 +43,6 @@ open class PlayerActivity : Activity() {
 
     companion object {
         var current: FrameLayout? = null
-        var savedVTrack = -2
-        var savedKey = ""
     }
 
     private val MP = ViewGroup.LayoutParams.MATCH_PARENT
@@ -73,6 +71,7 @@ open class PlayerActivity : Activity() {
     private lateinit var audioModeSeek: SeekBar
     private lateinit var audioModePlayBtn: TextView
     private var audioMode = false
+    private var audioSettingsAnimator: ValueAnimator? = null
     private var atomic: AtomicView? = null
     private var iconCol = Color.WHITE
     private var slop = 24
@@ -673,6 +672,63 @@ open class PlayerActivity : Activity() {
     }
 
     @Deprecated("Deprecated in Java")
+    private fun showAudioQueue() {
+        if (Engine.items.isEmpty()) return
+        val rows = Array(Engine.items.size) { i ->
+            val name = Engine.names.getOrNull(i) ?: Engine.items[i].lastPathSegment ?: "Video"
+            (if (i == Engine.idx) "\u25B6 " else "") + (i + 1) + ". " + name
+        }
+        AlertDialog.Builder(this).setTitle("Playback Queue")
+            .setItems(rows) { _, which -> Engine.loadAt(this, which) }
+            .show()
+    }
+
+    private fun showStyleCenter() {
+        val choices = arrayOf("Default / Current", "RGB", "Pink", "Dark", "Light",
+            "Gradient", "None", "Choose custom wallpaper")
+        AlertDialog.Builder(this).setTitle("Style Center")
+            .setItems(choices) { _, which ->
+                if (which == choices.lastIndex) {
+                    val pick = Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "image/*"
+                    }
+                    try { startActivityForResult(pick, 741) }
+                    catch (_: Exception) {
+                        Toast.makeText(this, "Image picker unavailable", Toast.LENGTH_SHORT).show()
+                    }
+                } else if (which > 0) {
+                    val modes = arrayOf("rgb", "pink", "dark", "light", "gradient", "none")
+                    Prefs.setThemeMode(this, modes[which - 1], true)
+                    recreateAudioModeStyle()
+                }
+            }.show()
+    }
+
+    private fun recreateAudioModeStyle() {
+        audioModePanel.setBackgroundColor(Prefs.bg(this))
+        val c = Prefs.accent(this)
+        audioModeSeek.progressTintList = ColorStateList.valueOf(c)
+        audioModeSeek.thumbTintList = ColorStateList.valueOf(c)
+        val bg = GradientDrawable()
+        bg.shape = GradientDrawable.OVAL
+        bg.setColor(c)
+        audioModePlayBtn.background = bg
+    }
+
+    @Deprecated("Deprecated Android callback retained for compatibility")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == 741 && resultCode == RESULT_OK) {
+            val uri = data?.data ?: return
+            try {
+                contentResolver.takePersistableUriPermission(uri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            } catch (_: Exception) {}
+            Prefs.setWall(this, uri.toString())
+            Toast.makeText(this, "Custom wallpaper saved", Toast.LENGTH_SHORT).show()
+        }
+    }
+
     override fun onBackPressed() {
         if (audioMode) {
             returnToVideo()
@@ -1100,11 +1156,63 @@ open class PlayerActivity : Activity() {
         seekLp.setMargins(0, dp(28), 0, dp(12))
         audioModePanel.addView(audioModeSeek, seekLp)
 
+        val transport = LinearLayout(this)
+        transport.gravity = Gravity.CENTER
+        transport.addView(ib("\u23EE", 27f) { Engine.prev(this) })
         audioModePlayBtn = ib("\u23F8", 34f) { Engine.toggle(this) }
         val audioPlayLp = LinearLayout.LayoutParams(dp(76), dp(76))
         audioPlayLp.gravity = Gravity.CENTER
-        audioPlayLp.setMargins(0, dp(18), 0, 0)
-        audioModePanel.addView(audioModePlayBtn, audioPlayLp)
+        audioPlayLp.setMargins(dp(16), dp(10), dp(16), dp(10))
+        val playCircle = GradientDrawable()
+        playCircle.shape = GradientDrawable.OVAL
+        playCircle.setColor(ac)
+        audioModePlayBtn.background = playCircle
+        transport.addView(audioModePlayBtn, audioPlayLp)
+        transport.addView(ib("\u23ED", 27f) { Engine.next(this) })
+        audioModePanel.addView(transport, LinearLayout.LayoutParams(MP, WC))
+
+        val skipRow = LinearLayout(this)
+        skipRow.gravity = Gravity.CENTER
+        skipRow.addView(ib("-" + Prefs.seekSec(this) + "s", 14f) {
+            val now = Engine.mp?.getTime() ?: 0L
+            Engine.seekTo((now - Prefs.seekSec(this) * 1000L).coerceAtLeast(0L))
+        })
+        skipRow.addView(ib("+" + Prefs.seekSec(this) + "s", 14f) {
+            val now = Engine.mp?.getTime() ?: 0L
+            Engine.seekTo(now + Prefs.seekSec(this) * 1000L)
+        })
+        audioModePanel.addView(skipRow, LinearLayout.LayoutParams(MP, WC))
+
+        val actionRow = LinearLayout(this)
+        actionRow.gravity = Gravity.CENTER
+        actionRow.addView(ib("EQ", 13f) { Dialogs.eq(this) })
+        actionRow.addView(ib("Boost", 13f) { Dialogs.boost(this) })
+        actionRow.addView(ib("Sleep", 13f) { Dialogs.sleep(this) })
+        actionRow.addView(ib("Queue", 13f) { showAudioQueue() })
+        audioModePanel.addView(actionRow, LinearLayout.LayoutParams(MP, WC))
+
+        val featureRow = LinearLayout(this)
+        featureRow.gravity = Gravity.CENTER
+        featureRow.addView(ib("Convert to Audio", 13f) {
+            Hooks.convert(this, listOf(Engine.cur()), listOf(Engine.title), null)
+        })
+        featureRow.addView(ib("Style Center", 13f) { showStyleCenter() })
+        audioModePanel.addView(featureRow, LinearLayout.LayoutParams(MP, WC))
+
+        val settingsGear = ib("\u2699", 24f) { showStyleCenter() }
+        audioModePanel.addView(settingsGear, LinearLayout.LayoutParams(WC, WC).apply {
+            gravity = Gravity.END
+        })
+        settingsGear.setOnClickListener {
+            audioSettingsAnimator?.cancel()
+            audioSettingsAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
+                duration = 650
+                interpolator = LinearInterpolator()
+                addUpdateListener { settingsGear.rotation = it.animatedValue as Float }
+                start()
+            }
+            showStyleCenter()
+        }
 
         audioModePanel.visibility = View.GONE
         root.addView(audioModePanel, FrameLayout.LayoutParams(MP, MP))
@@ -1124,7 +1232,6 @@ open class PlayerActivity : Activity() {
     override fun onResume() {
         super.onResume()
         PlaybackService.stop(this)
-        restoreVideo()
         hideBars()
     }
 
@@ -1136,34 +1243,9 @@ open class PlayerActivity : Activity() {
 
     override fun onStop() {
         super.onStop()
-        if (Engine.isPlaying()) {
-            if (!Engine.bgAudio) Engine.pause() else audioOnly()
+        if (Engine.isPlaying() && !Engine.bgAudio) {
+            Engine.pause()
         }
-    }
-
-    private fun audioOnly() {
-        val p = Engine.mp ?: return
-        if (Engine.items.isEmpty()) return
-        try {
-            val t = p.getVideoTrack()
-            if (t >= 0) {
-                savedVTrack = t
-                savedKey = Engine.cur().toString()
-                p.setVideoTrack(-1)
-            }
-        } catch (e: Exception) {
-        }
-    }
-
-    private fun restoreVideo() {
-        val p = Engine.mp ?: return
-        if (savedVTrack < 0 || Engine.items.isEmpty()) return
-        try {
-            if (Engine.cur().toString() == savedKey) p.setVideoTrack(savedVTrack)
-        } catch (e: Exception) {
-        }
-        savedVTrack = -2
-        savedKey = ""
     }
 
     override fun onDestroy() {
