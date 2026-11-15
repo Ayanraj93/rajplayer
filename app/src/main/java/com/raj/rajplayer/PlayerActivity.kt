@@ -73,6 +73,7 @@ open class PlayerActivity : Activity() {
     private var audioMode = false
     private var audioChildOpen = false
     private var systemBarsVisible = false
+    private var lastPlayingState: Boolean? = null
     private var audioSettingsAnimator: ValueAnimator? = null
     private var playerGearAnimator: ValueAnimator? = null
     private var playerSettingsGear: TextView? = null
@@ -154,6 +155,10 @@ open class PlayerActivity : Activity() {
                 if (abA >= 0 && abB > abA && t >= abB) seekTo(abA)
                 if (!userSeeking) curTv.text = fmt(t)
                 playBtn.text = if (p.isPlaying) "\u23F8" else "\u25B6"
+                if (lastPlayingState != p.isPlaying) {
+                    lastPlayingState = p.isPlaying
+                    applyPlaybackUi(p.isPlaying)
+                }
                 if (::audioModeSeek.isInitialized) {
                     if (!userSeeking && audioMode) {
                         audioModeSeek.max = len.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
@@ -211,10 +216,8 @@ open class PlayerActivity : Activity() {
     private fun hideBars() {
         systemBarsVisible = false
         window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN
-                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
                 or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                 or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
-                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                 or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
     }
 
@@ -244,7 +247,23 @@ open class PlayerActivity : Activity() {
         window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
     }
 
+    private fun showPausedControls() {
+        hideBars()
+        if (locked) {
+            lockBtn.visibility = View.VISIBLE
+        } else {
+            topBar.visibility = View.VISIBLE
+            controls.visibility = View.VISIBLE
+            lockBtn.visibility = View.VISIBLE
+        }
+        ui.removeCallbacks(hideRun)
+    }
+
     private fun showControls() {
+        if (!Engine.isPlaying()) {
+            showPausedControls()
+            return
+        }
         showBars()
         if (locked) {
             lockBtn.visibility = View.VISIBLE
@@ -254,7 +273,7 @@ open class PlayerActivity : Activity() {
             lockBtn.visibility = View.VISIBLE
         }
         ui.removeCallbacks(hideRun)
-        ui.postDelayed(hideRun, 2600)
+        ui.postDelayed(hideRun, 5000L)
     }
 
     private fun hideControls() {
@@ -262,6 +281,11 @@ open class PlayerActivity : Activity() {
         topBar.visibility = View.GONE
         controls.visibility = View.GONE
         lockBtn.visibility = View.GONE
+        ui.removeCallbacks(hideRun)
+    }
+
+    private fun applyPlaybackUi(playing: Boolean) {
+        if (playing) hideControls() else showPausedControls()
     }
 
     private fun controlsVisible() = lockBtn.visibility == View.VISIBLE
@@ -437,7 +461,11 @@ open class PlayerActivity : Activity() {
 
     private fun togglePlay() {
         Engine.toggle(this)
-        showControls()
+        ui.post {
+            val playing = Engine.isPlaying()
+            lastPlayingState = playing
+            applyPlaybackUi(playing)
+        }
     }
 
 
@@ -803,12 +831,18 @@ open class PlayerActivity : Activity() {
             override fun onDown(e: MotionEvent): Boolean = true
 
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                if (!controlsVisible()) {
-                    showControls() // first tap: controls + Android system bars
-                } else if (systemBarsVisible) {
-                    hideBars() // next tap: hide only Android bars; keep controls visible
+                if (Engine.isPlaying()) {
+                    if (!controlsVisible()) {
+                        showControls()
+                    } else if (systemBarsVisible) {
+                        hideBars()
+                        ui.removeCallbacks(hideRun)
+                        ui.postDelayed(hideRun, 5000L)
+                    } else {
+                        hideControls()
+                    }
                 } else {
-                    showBars()
+                    if (systemBarsVisible) hideBars() else showBars()
                 }
                 return true
             }
@@ -1299,19 +1333,18 @@ open class PlayerActivity : Activity() {
         super.onResume()
         audioChildOpen = false
         Engine.listener = lis
+        lastPlayingState = null
         if (Engine.active && Engine.isPlaying()) PlaybackService.start(this) else PlaybackService.stop(this)
         ui.removeCallbacks(controlRgbTick)
         if (controlRgbTargets.isNotEmpty()) ui.post(controlRgbTick)
         playerGearAnimator?.cancel()
         playerSettingsGear?.let { gear ->
-            if (Prefs.themeMode(this) == "rgb") {
-                playerGearAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
-                    duration = 5000L
-                    repeatCount = ValueAnimator.INFINITE
-                    interpolator = LinearInterpolator()
-                    addUpdateListener { gear.rotation = it.animatedValue as Float }
-                    start()
-                }
+            playerGearAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
+                duration = 5000L
+                repeatCount = ValueAnimator.INFINITE
+                interpolator = LinearInterpolator()
+                addUpdateListener { gear.rotation = it.animatedValue as Float }
+                start()
             }
         }
         hideBars()

@@ -81,6 +81,7 @@ class MainActivity : Activity() {
     private var searchOn = false
     private var query = ""
     private var selectMode = false
+    private var conversionSelectMode = false
     private var gestureGuideShowing = false
     private val selected = LinkedHashSet<String>()
     private val rgbTargets = ArrayList<(Int) -> Unit>()
@@ -284,7 +285,14 @@ class MainActivity : Activity() {
         v.textSize = 22f
         v.setTextColor(color)
         v.setPadding(dp(10), dp(8), dp(10), dp(8))
-        v.setOnClickListener { f() }
+        v.setOnClickListener {
+            if (t.contains("\u2699")) {
+                v.animate().cancel()
+                v.rotation = 0f
+                v.animate().rotationBy(360f).setDuration(700L).start()
+            }
+            f()
+        }
         return v
     }
 
@@ -667,6 +675,7 @@ class MainActivity : Activity() {
 
     private fun exitSelect() {
         selectMode = false
+        conversionSelectMode = false
         selected.clear()
         showHome()
     }
@@ -1032,15 +1041,22 @@ class MainActivity : Activity() {
             selCountTv = cnt
             head.addView(cnt, LinearLayout.LayoutParams(0, WC, 1f))
             head.addView(sym("\u2611", ic) { selectAll() })
-            head.addView(sym("\u2B50", ic) { favSelected() })
-            head.addView(sym("\uD83C\uDFB5", ic) {
-                val chosen = shown.filter { selected.contains(it.uri.toString()) }
-                Hooks.convert(this, chosen.map { it.uri }, chosen.map { it.name }) {
-                    dirty = true
-                    exitSelect()
-                }
-            })
-            head.addView(sym("\uD83D\uDDD1", Color.parseColor("#FF5252")) { confirmDelete() })
+            if (conversionSelectMode) {
+                head.addView(sym("\uD83C\uDFB5", ic) {
+                    val chosen = shown.filter { selected.contains(it.uri.toString()) }
+                    if (chosen.isEmpty()) {
+                        toast("Select videos first")
+                    } else {
+                        Hooks.convert(this, chosen.map { it.uri }, chosen.map { it.name }) {
+                            dirty = true
+                            exitSelect()
+                        }
+                    }
+                })
+            } else {
+                head.addView(sym("\u2B50", ic) { favSelected() })
+                head.addView(sym("\uD83D\uDDD1", Color.parseColor("#FF5252")) { confirmDelete() })
+            }
         } else {
             selCountTv = null
             // "RajPlayer Pro" ka chalta-phirta RGB title
@@ -1051,8 +1067,13 @@ class MainActivity : Activity() {
             // Long-press avoids accidental conversion selection while tapping the title.
             brand.setOnLongClickListener {
                 selectMode = true
+                conversionSelectMode = true
+                tab = 0
+                openFolder = null
+                searchOn = false
+                query = ""
                 selected.clear()
-                toast("Select videos for multiple conversion")
+                toast("Video conversion mode: select videos")
                 showHome()
                 true
             }
@@ -1096,9 +1117,9 @@ class MainActivity : Activity() {
             Prefs.setGridView(this, !Prefs.gridView(this))
             showHome()
         })
-        root.addView(navRow)
+        if (!conversionSelectMode) root.addView(navRow)
 
-        if (searchOn) {
+        if (searchOn && !conversionSelectMode) {
             val se = EditText(this)
             se.hint = "Search media..."
             se.setTextColor(tc)
@@ -1122,7 +1143,7 @@ class MainActivity : Activity() {
         miniBar = buildMini(ac)
         val mlp = LinearLayout.LayoutParams(MP, WC)
         mlp.setMargins(0, dp(6), 0, 0)
-        root.addView(miniBar, mlp)
+        if (!conversionSelectMode) root.addView(miniBar, mlp)
 
         renderList()
         refreshMini()
@@ -1159,7 +1180,10 @@ class MainActivity : Activity() {
         val of = openFolder
         val q = query.trim().lowercase()
 
-        if (q.isNotEmpty()) {
+        if (conversionSelectMode) {
+            shown = videos
+            for (v in shown) items.add(itemOf(v, "V"))
+        } else if (q.isNotEmpty()) {
             shown = (videos + audios).filter { it.name.lowercase().contains(q) }
             for (v in shown) items.add(itemOf(v, if (isAudio(v.uri)) "\uD83C\uDFB5" else "V"))
         } else if (tab == 3) {
