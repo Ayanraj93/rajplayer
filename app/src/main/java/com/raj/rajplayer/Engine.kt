@@ -113,7 +113,6 @@ object Engine {
                 notifyChanged()
             }
             override fun onRenderedFirstFrame() {
-                renderedFrames++
                 notifyChanged()
             }
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {

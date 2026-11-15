@@ -36,6 +36,7 @@ class MediaPlayer(val player: ExoPlayer) {
     private var equalizer: AndroidEqualizer? = null
     private var loudness: android.media.audiofx.LoudnessEnhancer? = null
     private var scaleType: ScaleType = ScaleType.SURFACE_BEST_FIT
+    private var layoutChangeListener: android.view.View.OnLayoutChangeListener? = null
 
     init {
         player.addListener(object : androidx.media3.common.Player.Listener {
@@ -121,10 +122,12 @@ class MediaPlayer(val player: ExoPlayer) {
         host = container
         container.removeAllViews()
 
-        container.addOnLayoutChangeListener {
+        val listener = android.view.View.OnLayoutChangeListener {
                 _, _, _, _, _, _, _, _, _ ->
             adjustSurface()
         }
+        layoutChangeListener = listener
+        container.addOnLayoutChangeListener(listener)
 
         if (grading) {
             val tv = TextureView(container.context)
@@ -169,10 +172,15 @@ class MediaPlayer(val player: ExoPlayer) {
         }
 
         try {
-            host?.removeAllViews()
+            val oldHost = host
+            layoutChangeListener?.let { listener ->
+                oldHost?.removeOnLayoutChangeListener(listener)
+            }
+            oldHost?.removeAllViews()
         } catch (_: Exception) {
         }
 
+        layoutChangeListener = null
         surface = null
         texture = null
         host = null

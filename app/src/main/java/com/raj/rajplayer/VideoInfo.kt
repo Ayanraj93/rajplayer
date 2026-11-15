@@ -271,7 +271,13 @@ object VideoInfo {
             if (i.fps > 0f) sb.append("Frame rate: ").append(fpsLabel(i.fps)).append(" fps\n")
             sb.append("Video codec: ").append(codecName(i.vMime)).append("\n")
             val vbl = bitrateLabel(i.vBitrate)
-            if (vbl.isNotEmpty()) sb.append("Video bitrate: ").append(vbl).append("\n")
+            if (vbl.isNotEmpty()) {
+                sb.append("Video bitrate: ").append(vbl).append("\n")
+            } else if (meta.first > 0L && i.durMs > 0L) {
+                val estimated = (meta.first.toDouble() * 8_000.0 / i.durMs.toDouble()).toLong()
+                sb.append("Overall bitrate (estimated): ")
+                    .append(bitrateLabel(estimated)).append("\n")
+            }
             sb.append("HDR: ").append(i.hdr).append("\n")
             if (i.std.isNotEmpty() || i.range.isNotEmpty()) {
                 sb.append("Colour: ").append(i.std)

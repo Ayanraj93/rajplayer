@@ -23,6 +23,10 @@ import android.widget.TextView
 // Colour grading (brightness / contrast / saturation / warmth) + HDR boost.
 // Grading ON = video TextureView me chalta hai; OFF = asli surface (native HDR passthrough)
 object ColorGrade {
+    private val layerPaint = Paint()
+    private var cachedFilterKey: String? = null
+    private var cachedColorFilter: ColorMatrixColorFilter? = null
+
     private fun p(c: Context) = c.getSharedPreferences("rajplayer_ultra", Context.MODE_PRIVATE)
 
     fun on(c: Context): Boolean = p(c).getBoolean("cg_on", false)
@@ -88,9 +92,26 @@ object ColorGrade {
     // video layout ke TextureView par filter lagao / hatao
     fun apply(c: Context, root: View?) {
         val tv = findTexture(root) ?: return
-        val paint = Paint()
-        if (on(c)) paint.colorFilter = ColorMatrixColorFilter(matrix(bright(c), contrast(c), sat(c), warm(c)))
-        tv.setLayerPaint(paint)
+
+        if (on(c)) {
+            val b = bright(c)
+            val con = contrast(c)
+            val saturation = sat(c)
+            val w = warm(c)
+            val key = "$b:$con:$saturation:$w"
+
+            if (cachedFilterKey != key || cachedColorFilter == null) {
+                cachedColorFilter = ColorMatrixColorFilter(
+                    matrix(b, con, saturation, w)
+                )
+                cachedFilterKey = key
+            }
+            layerPaint.colorFilter = cachedColorFilter
+        } else {
+            layerPaint.colorFilter = null
+        }
+
+        tv.setLayerPaint(layerPaint)
     }
 
     @Suppress("DEPRECATION")
