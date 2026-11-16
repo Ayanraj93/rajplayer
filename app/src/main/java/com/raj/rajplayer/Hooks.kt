@@ -190,15 +190,18 @@ object Hooks {
 
                 try {
                     val temp = if (format == "M4A") {
-                        encodeVideoAudioToM4a(a, uris[index], cancelled, onFileProgress).also {
-                            if (!cancelled.get()) publishM4a(a, it, name)
-                        }
+                        encodeVideoAudioToM4a(a, uris[index], cancelled, onFileProgress)
                     } else {
-                        encodeVideoAudioToMp3(a, uris[index], cancelled, onFileProgress).also {
-                            if (!cancelled.get()) publishMp3(a, it, name)
-                        }
+                        encodeVideoAudioToMp3(a, uris[index], cancelled, onFileProgress)
                     }
-                    temp.delete()
+                    try {
+                        if (!cancelled.get()) {
+                            if (format == "M4A") publishM4a(a, temp, name)
+                            else publishMp3(a, temp, name)
+                        }
+                    } finally {
+                        temp.delete()
+                    }
                     if (cancelled.get()) break
                     success++
                     a.runOnUiThread {

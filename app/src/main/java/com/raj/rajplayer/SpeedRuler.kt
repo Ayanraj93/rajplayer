@@ -20,11 +20,11 @@ import android.widget.ScrollView
 import android.widget.TextView
 import java.util.Locale
 
-// PLAYit jaisa speed ruler: ungli se khicho, 0.05x ke step, 1x se 4x tak
+// PLAYit jaisa speed ruler: 0.05x steps, 1x se 5x tak
 class SpeedRulerView(ctx: Context) : View(ctx) {
 
     var minV = 1f
-    var maxV = 4f
+    var maxV = 5f
     var value = 1f
     var accent = Color.parseColor("#00E676")
     var onChange: ((Float) -> Unit)? = null
@@ -137,7 +137,7 @@ object SpeedPanel {
 
         val hs = HorizontalScrollView(a)
         val row = LinearLayout(a)
-        for (p in floatArrayOf(1f, 1.5f, 2f, 2.5f, 3f, 4f)) {
+        for (p in floatArrayOf(1f, 1.5f, 2f, 2.5f, 3f, 4f, 5f)) {
             val b = Button(a)
             b.text = lbl(p)
             b.setOnClickListener {

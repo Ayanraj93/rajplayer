@@ -57,6 +57,7 @@ class AudioActivity : Activity() {
     private lateinit var topBarView: LinearLayout
     private lateinit var playCircle: GradientDrawable
     private var gearAnimator: ValueAnimator? = null
+    private var settingsGearMotion: GearMotion? = null
     private var wallView: ImageView? = null
     private var wallDim: View? = null
 
@@ -65,7 +66,7 @@ class AudioActivity : Activity() {
     private var userSeeking = false
     private var audioSystemBarsHidden = false
     private var artKey = ""
-    private val speeds = floatArrayOf(1f, 1.5f, 2f, 2.5f, 3f, 4f)
+    private val speeds = floatArrayOf(1f, 1.5f, 2f, 2.5f, 3f, 4f, 5f)
     private var speedIdx = 0
     private val rgbTargets = ArrayList<(Int) -> Unit>()
 
@@ -112,7 +113,7 @@ class AudioActivity : Activity() {
         t.gravity = Gravity.CENTER
         t.setPadding(dp(12), dp(8), dp(12), dp(8))
         t.setOnClickListener { f(t) }
-        rgbTargets.add { c -> t.setTextColor(c) }
+        if (!sym.contains("\u2699")) rgbTargets.add { c -> t.setTextColor(c) }
         return t
     }
 
@@ -254,12 +255,17 @@ class AudioActivity : Activity() {
             })
         }
         val hdr = TextView(this)
-        hdr.text = "NOW PLAYING"
+        hdr.text = if (videoSession) "BACKGROUND PLAY" else "NOW PLAYING"
         hdr.textSize = 13f
         hdr.setTextColor(tc)
         hdr.gravity = Gravity.CENTER
         top.addView(hdr, LinearLayout.LayoutParams(0, WC, 1f))
-        top.addView(ib("\u2699", 22f, ic) { showStyleCenter() }.also { gearButton = it })
+        val settingsGear = ib("\u2699", 22f, ic) { showStyleCenter() }.also { gearButton = it }
+        settingsGear.setOnClickListener {
+            settingsGearMotion?.tap()
+            showStyleCenter()
+        }
+        top.addView(settingsGear)
         top.addView(ib("\u22EF", 24f, ic) { menu() })
         top.addView(ib("\u2715", 20f, ic) {
             Prefs.setAudioModeSession(this, false)
@@ -626,14 +632,8 @@ class AudioActivity : Activity() {
         super.onResume()
         visible = true
         if (Engine.active && Engine.isPlaying()) PlaybackService.start(this)
-        gearAnimator?.cancel()
-        gearAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
-            duration = 5000L
-            repeatCount = ValueAnimator.INFINITE
-            interpolator = LinearInterpolator()
-            addUpdateListener { gearButton.rotation = it.animatedValue as Float }
-            start()
-        }
+        settingsGearMotion?.stop()
+        settingsGearMotion = GearMotion(gearButton).also { it.start() }
         ui.post(tick)
         ui.removeCallbacks(rgbTick)
         if (rgbTargets.isNotEmpty() && audioRgbEnabled()) ui.post(rgbTick)
@@ -642,8 +642,8 @@ class AudioActivity : Activity() {
 
     override fun onPause() {
         visible = false
-        gearAnimator?.cancel()
-        gearAnimator = null
+        settingsGearMotion?.stop()
+        settingsGearMotion = null
         super.onPause()
         ui.removeCallbacks(tick)
         ui.removeCallbacks(rgbTick)
@@ -658,10 +658,20 @@ class AudioActivity : Activity() {
         super.onBackPressed()
     }
 
+    override fun onStop() {
+        super.onStop()
+        if (Prefs.audioModeSession(this) &&
+            Engine.active && Engine.isPlaying() && Engine.isVideo) {
+            Engine.saveProgress()
+            Bg.toAudioOnly()
+        }
+    }
+
     override fun onDestroy() {
         visible = false
         // Keep the persisted session flag while background audio continues; Back to Video clears it.
-        gearAnimator?.cancel()
+        settingsGearMotion?.stop()
+        settingsGearMotion = null
         super.onDestroy()
         ui.removeCallbacksAndMessages(null)
         if (Engine.listener === lis) Engine.listener = null

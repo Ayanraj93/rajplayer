@@ -1,5 +1,7 @@
 package com.raj.rajplayer
 
+import android.animation.ValueAnimator
+
 import android.Manifest
 import android.app.Activity
 import android.app.AlertDialog
@@ -29,6 +31,7 @@ import android.view.GestureDetector
 import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
+import android.view.animation.LinearInterpolator
 import android.widget.AdapterView
 import android.widget.BaseAdapter
 import android.widget.Button
@@ -65,6 +68,9 @@ class MainActivity : Activity() {
     private var atomic: AtomicView? = null
     private var settingsSv: ScrollView? = null
     private var settingsY = 0
+    private var settingsGearAnimator: ValueAnimator? = null
+    private var settingsGearIcon: TextView? = null
+    private var homeGearMotion: GearMotion? = null
     private var infoPosted = false
     private var swipeRefresh: SwipeRefreshLayout? = null
     private val mediaLoadRunning = AtomicBoolean(false)
@@ -132,6 +138,17 @@ class MainActivity : Activity() {
         if (handleIncoming(intent)) finish()
     }
 
+    private fun startSettingsGearAnimation() {
+        stopSettingsGearAnimation()
+        val gear = settingsGearIcon ?: return
+        homeGearMotion = GearMotion(gear).also { it.start() }
+    }
+
+    private fun stopSettingsGearAnimation() {
+        homeGearMotion?.stop()
+        homeGearMotion = null
+    }
+
     override fun onResume() {
         super.onResume()
         if (isFinishing) return
@@ -140,12 +157,19 @@ class MainActivity : Activity() {
             reqPerms()
         }
         dirty = true
-        if (inSettings) refreshSettings() else showHome()
+        if (inSettings) {
+            stopSettingsGearAnimation()
+            refreshSettings()
+        } else {
+            showHome()
+            startSettingsGearAnimation()
+        }
         ui.post(miniTick)
         if (hasPerm()) Power.askOnce(this)
     }
 
     override fun onPause() {
+        stopSettingsGearAnimation()
         super.onPause()
         ui.removeCallbacks(miniTick)
         ui.removeCallbacks(rgbTick)
@@ -285,11 +309,13 @@ class MainActivity : Activity() {
         v.textSize = 22f
         v.setTextColor(color)
         v.setPadding(dp(10), dp(8), dp(10), dp(8))
+        if (t.contains("\u2699")) {
+            settingsGearIcon = v
+        }
         v.setOnClickListener {
             if (t.contains("\u2699")) {
-                v.animate().cancel()
-                v.rotation = 0f
-                v.animate().rotationBy(360f).setDuration(700L).start()
+                homeGearMotion?.tap()
+                ui.postDelayed({ stopSettingsGearAnimation() }, 700L)
             }
             f()
         }

@@ -77,9 +77,16 @@ open class PlayerActivity : Activity() {
     private var audioSettingsAnimator: ValueAnimator? = null
     private var playerGearAnimator: ValueAnimator? = null
     private var playerSettingsGear: TextView? = null
+    private var audioSettingsGear: TextView? = null
+    private var playerGearMotion: GearMotion? = null
+    private var audioGearMotion: GearMotion? = null
     private var headphoneButton: TextView? = null
     private var headphoneRgbAnimator: ValueAnimator? = null
     private var headphoneBlinkAnimator: ValueAnimator? = null
+    private var infoGlowAnimator: ValueAnimator? = null
+    private var rotateGlowAnimator: ValueAnimator? = null
+    private var infoButtonView: TextView? = null
+    private var rotateButtonView: TextView? = null
     private val controlRgbTargets = ArrayList<(Int) -> Unit>()
     private val controlRgbTick = object : Runnable {
         override fun run() {
@@ -116,7 +123,7 @@ open class PlayerActivity : Activity() {
     private var lastFx = 0f
     private var lastFy = 0f
 
-    // speed: 0.25x .. 4x (ruler) + smart auto-fix
+    // speed: 0.25x .. 5x (ruler) + smart auto-fix
     private var rate = 1f
     private var lastDropNoticeAt = 0L
     private var lastDropCountSeen = 0L
@@ -209,7 +216,7 @@ open class PlayerActivity : Activity() {
         t.gravity = Gravity.CENTER
         t.setPadding(dp(10), dp(8), dp(10), dp(8))
         t.setOnClickListener { f(t) }
-        if (sym != "\uD83C\uDFA7" && Prefs.themeMode(this) == "rgb" && !Prefs.hasOverride(this, Prefs.K_ICON)) {
+        if (sym != "\uD83C\uDFA7" && !sym.contains("\u2699") && Prefs.themeMode(this) == "rgb" && !Prefs.hasOverride(this, Prefs.K_ICON)) {
             controlRgbTargets.add { c -> t.setTextColor(c) }
         }
         return t
@@ -249,6 +256,50 @@ open class PlayerActivity : Activity() {
         headphoneBlinkAnimator?.cancel()
         headphoneBlinkAnimator = null
         headphoneButton?.alpha = 1f
+    }
+
+    private fun makeSoftIconGlow(view: TextView): ValueAnimator {
+        return ValueAnimator.ofFloat(0f, 1f).apply {
+            duration = 1700L
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+            addUpdateListener {
+                val f = it.animatedValue as Float
+                val color = android.animation.ArgbEvaluator().evaluate(
+                    f, Color.rgb(120, 220, 255), Color.WHITE
+                ) as Int
+                view.setShadowLayer(
+                    dp(3).toFloat() + dp(5) * f,
+                    0f, 0f, color
+                )
+                view.alpha = 0.88f + 0.12f * f
+            }
+        }
+    }
+
+    private fun startTopIconGlow() {
+        stopTopIconGlow()
+        infoButtonView?.let {
+            infoGlowAnimator = makeSoftIconGlow(it).also { a -> a.start() }
+        }
+        rotateButtonView?.let {
+            rotateGlowAnimator = makeSoftIconGlow(it).also { a -> a.start() }
+        }
+    }
+
+    private fun stopTopIconGlow() {
+        infoGlowAnimator?.cancel()
+        infoGlowAnimator = null
+        rotateGlowAnimator?.cancel()
+        rotateGlowAnimator = null
+        infoButtonView?.apply {
+            setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+            alpha = 1f
+        }
+        rotateButtonView?.apply {
+            setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+            alpha = 1f
+        }
     }
 
     @Suppress("DEPRECATION")
@@ -464,7 +515,7 @@ open class PlayerActivity : Activity() {
     }
 
     private fun setRateTo(r: Float) {
-        rate = Math.round(r.coerceIn(0.25f, 4f) * 20f) / 20f
+        rate = Math.round(r.coerceIn(0.25f, 5f) * 20f) / 20f
         applyRate()
     }
 
@@ -1104,14 +1155,18 @@ open class PlayerActivity : Activity() {
             decoderDialog()
             true
         }
+        infoButtonView = infoButton
         topBar.addView(infoButton)
-        topBar.addView(ib("\uD83D\uDD04", 20f) {
+
+        val rotateButton = ib("\uD83D\uDD04", 20f) {
             requestedOrientation =
                 if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
                     ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
                 else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             showControls()
-        })
+        }
+        rotateButtonView = rotateButton
+        topBar.addView(rotateButton)
         val headphone = ib("\uD83C\uDFA7", 20f) {
             enterAudioMode()
         }
@@ -1245,7 +1300,10 @@ open class PlayerActivity : Activity() {
         exRow.addView(ib("Sub", 14f) {
             pickTrack("Subtitles", mp.getSpuTracks()) { id -> mp.setSpuTrack(id) }
         })
-        exRow.addView(ib("\u2699\uFE0F", 18f) { showMenu() }.also { playerSettingsGear = it })
+        exRow.addView(ib("\u2699\uFE0F", 18f) {
+            playerGearMotion?.tap()
+            showMenu()
+        }.also { playerSettingsGear = it })
         controls.addView(exRow)
         root.addView(controls, FrameLayout.LayoutParams(MP, WC, Gravity.BOTTOM))
 
@@ -1366,17 +1424,12 @@ open class PlayerActivity : Activity() {
         audioModePanel.addView(featureRow, LinearLayout.LayoutParams(MP, WC))
 
         val settingsGear = ib("\u2699", 24f) { showStyleCenter() }
+        audioSettingsGear = settingsGear
         audioModePanel.addView(settingsGear, LinearLayout.LayoutParams(WC, WC).apply {
             gravity = Gravity.END
         })
         settingsGear.setOnClickListener {
-            audioSettingsAnimator?.cancel()
-            audioSettingsAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
-                duration = 650
-                interpolator = LinearInterpolator()
-                addUpdateListener { settingsGear.rotation = it.animatedValue as Float }
-                start()
-            }
+            audioGearMotion?.tap()
             showStyleCenter()
         }
 
@@ -1398,30 +1451,29 @@ open class PlayerActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        if (!Prefs.audioModeSession(this)) Bg.restoreVideo()
         audioChildOpen = false
         Engine.listener = lis
         lastPlayingState = null
         if (Engine.active && Engine.isPlaying()) PlaybackService.start(this) else PlaybackService.stop(this)
         ui.removeCallbacks(controlRgbTick)
         if (controlRgbTargets.isNotEmpty()) ui.post(controlRgbTick)
-        playerGearAnimator?.cancel()
-        playerSettingsGear?.let { gear ->
-            playerGearAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
-                duration = 5000L
-                repeatCount = ValueAnimator.INFINITE
-                interpolator = LinearInterpolator()
-                addUpdateListener { gear.rotation = it.animatedValue as Float }
-                start()
-            }
-        }
+        playerGearMotion?.stop()
+        audioGearMotion?.stop()
+        playerGearMotion = playerSettingsGear?.let { GearMotion(it).also { motion -> motion.start() } }
+        audioGearMotion = audioSettingsGear?.let { GearMotion(it).also { motion -> motion.start() } }
         startHeadphoneAnimations()
+        startTopIconGlow()
         hideBars()
     }
 
     override fun onPause() {
+        stopTopIconGlow()
         stopHeadphoneAnimations()
-        playerGearAnimator?.cancel()
-        playerGearAnimator = null
+        playerGearMotion?.stop()
+        playerGearMotion = null
+        audioGearMotion?.stop()
+        audioGearMotion = null
         ui.removeCallbacks(controlRgbTick)
         super.onPause()
         Engine.saveProgress()
@@ -1436,7 +1488,12 @@ open class PlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        stopTopIconGlow()
         stopHeadphoneAnimations()
+        playerGearMotion?.stop()
+        audioGearMotion?.stop()
+        playerGearMotion = null
+        audioGearMotion = null
         titleRgbAnimator?.cancel()
         titleRgbAnimator = null
         titleRgbShader = null

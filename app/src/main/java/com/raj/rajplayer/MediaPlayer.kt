@@ -80,7 +80,7 @@ class MediaPlayer(val player: ExoPlayer) {
     }
 
     fun setRate(rate: Float) {
-        val safe = rate.coerceIn(0.25f, 4f)
+        val safe = rate.coerceIn(0.25f, 5f)
         player.setPlaybackParameters(PlaybackParameters(safe, 1f))
     }
 

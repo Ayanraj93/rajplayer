@@ -4,6 +4,8 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.media.AudioAttributes as AndroidAudioAttributes
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
 import android.media.AudioFocusRequest
 import android.media.AudioManager
 import android.net.Uri
@@ -47,6 +49,8 @@ object Engine {
     private val main = Handler(Looper.getMainLooper())
     private var focusReq: AudioFocusRequest? = null
     private var resumeOnFocus = false
+    @Volatile private var resumeAfterBluetooth = false
+    private var audioDeviceCallback: AudioDeviceCallback? = null
     private var wake: PowerManager.WakeLock? = null
     private var wifi: WifiManager.WifiLock? = null
     private val sleepRun = Runnable { pause(); notifyChanged() }
@@ -83,6 +87,7 @@ object Engine {
 
     fun ensure(ctx: Context): MediaPlayer {
         app = ctx.applicationContext
+        registerAudioDeviceCallback()
         mp?.let { return it }
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(12000, 45000, 2500, 4000)
@@ -95,6 +100,7 @@ object Engine {
             .setEnableAudioOutputPlaybackParameters(false)
         val exo = ExoPlayer.Builder(app, renderers)
             .setLoadControl(loadControl)
+            .setHandleAudioBecomingNoisy(false)
             .build()
         exo.setPlaybackParameters(PlaybackParameters(1f, 1f))
         exo.setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
@@ -173,6 +179,8 @@ object Engine {
         Prefs.setLastPlayedUri(app, uri.toString())
         videoDecoderName = "Initializing MediaCodec…"
         ended = false
+        resumeOnFocus = false
+        resumeAfterBluetooth = false
         droppedFrames = 0L
         renderedFrames = 0L
         try {
@@ -189,7 +197,8 @@ object Engine {
         } catch (e: Exception) {
             Toast.makeText(app, "File nahi khuli: ${e.message}", Toast.LENGTH_LONG).show()
         }
-        if (!isVideo && PlaybackService.instance == null) PlaybackService.start(ctx)
+        // Keep the media foreground service available for audio and video playback.
+        PlaybackService.start(ctx)
         listener?.onItemChanged()
         notifyChanged()
     }
@@ -215,11 +224,11 @@ object Engine {
     fun toggle(ctx: Context) {
         val p = mp ?: return
         if (ended) { loadAt(ctx, idx); return }
-        if (p.isPlaying) { resumeOnFocus = false; p.pause(); saveProgress(); releaseLocks() }
-        else { requestFocus(); p.play(); holdLocks() }
+        if (p.isPlaying) { resumeOnFocus = false; resumeAfterBluetooth = false; p.pause(); saveProgress(); releaseLocks() }
+        else { resumeAfterBluetooth = false; requestFocus(); p.play(); holdLocks() }
         notifyChanged()
     }
-    fun pause() { resumeOnFocus = false; mp?.pause(); saveProgress(); releaseLocks() }
+    fun pause() { resumeOnFocus = false; resumeAfterBluetooth = false; mp?.pause(); saveProgress(); releaseLocks() }
     fun next(ctx: Context) {
         if (items.isEmpty()) return
         if (Prefs.shuffleFor(app, isVideo) && items.size > 1) loadAt(ctx, randomOther())
@@ -239,7 +248,7 @@ object Engine {
     }
     fun sleep(minutes: Int) { main.removeCallbacks(sleepRun); if (minutes > 0) main.postDelayed(sleepRun, minutes * 60000L) }
     fun stopAll(ctx: Context) {
-        saveProgress(); main.removeCallbacks(sleepRun); resumeOnFocus = false
+        saveProgress(); main.removeCallbacks(sleepRun); resumeOnFocus = false; resumeAfterBluetooth = false
         try { mp?.player?.stop(); mp?.player?.release() } catch (_: Exception) { }
         mp = null; active = false; ended = false; releaseLocks(); PlaybackService.stop(ctx); listener?.onItemChanged()
     }
@@ -255,13 +264,78 @@ object Engine {
                     .setAudioAttributes(attrs)
                     .setOnAudioFocusChangeListener { change -> main.post {
                         when (change) {
-                            AudioManager.AUDIOFOCUS_GAIN -> if (resumeOnFocus) { resumeOnFocus = false; mp?.play(); holdLocks(); notifyChanged() }
+                            AudioManager.AUDIOFOCUS_GAIN -> if (resumeOnFocus) {
+                                resumeOnFocus = false
+                                resumeAfterBluetooth = false
+                                mp?.play()
+                                holdLocks()
+                                notifyChanged()
+                            }
                             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> if (isPlaying()) { resumeOnFocus = true; mp?.pause(); notifyChanged() }
-                            AudioManager.AUDIOFOCUS_LOSS -> { resumeOnFocus = false; pause(); notifyChanged() }
+                            AudioManager.AUDIOFOCUS_LOSS -> {
+                                if (resumeAfterBluetooth) {
+                                    resumeOnFocus = true
+                                    mp?.pause()
+                                    saveProgress()
+                                    releaseLocks()
+                                    notifyChanged()
+                                } else {
+                                    resumeOnFocus = false
+                                    pause()
+                                    notifyChanged()
+                                }
+                            }
                         }
                     } }.build()
             }
-            focusReq?.let { am.requestAudioFocus(it) }
+            val result = focusReq?.let { am.requestAudioFocus(it) } ?: AudioManager.AUDIOFOCUS_REQUEST_FAILED
+            if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED && resumeOnFocus) {
+                resumeOnFocus = false
+                resumeAfterBluetooth = false
+                mp?.play()
+                holdLocks()
+                notifyChanged()
+            }
+        } catch (_: Exception) { }
+    }
+
+    private fun isBluetoothOutput(d: AudioDeviceInfo): Boolean = when (d.type) {
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+        AudioDeviceInfo.TYPE_BLE_HEADSET,
+        AudioDeviceInfo.TYPE_BLE_SPEAKER -> true
+        else -> false
+    }
+
+    private fun registerAudioDeviceCallback() {
+        if (audioDeviceCallback != null) return
+        try {
+            val am = app.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            val cb = object : AudioDeviceCallback() {
+                override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) {
+                    main.post {
+                        val removedBt = removedDevices.any { isBluetoothOutput(it) }
+                        val btStillConnected = am.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { isBluetoothOutput(it) }
+                        if (removedBt && !btStillConnected && (isPlaying() || resumeOnFocus)) {
+                            resumeAfterBluetooth = true
+                            resumeOnFocus = true
+                            if (isPlaying()) mp?.pause()
+                            saveProgress()
+                            notifyChanged()
+                        }
+                    }
+                }
+
+                override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) {
+                    main.post {
+                        if (addedDevices.any { isBluetoothOutput(it) } && resumeAfterBluetooth) {
+                            requestFocus()
+                        }
+                    }
+                }
+            }
+            am.registerAudioDeviceCallback(cb, main)
+            audioDeviceCallback = cb
         } catch (_: Exception) { }
     }
 }

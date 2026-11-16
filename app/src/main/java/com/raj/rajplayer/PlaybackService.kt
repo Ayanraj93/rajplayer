@@ -170,7 +170,9 @@ class PlaybackService : Service() {
         b.setContentTitle(if (Engine.title.isEmpty()) "RajPlayer" else Engine.title)
         b.setContentText(if (Engine.items.isNotEmpty()) (Engine.idx + 1).toString() + " / " + Engine.items.size else "")
         b.setContentIntent(openPi())
-        b.setOngoing(playing)
+        // Keep the playback notification persistent while a media session is active,
+        // including when playback is paused or temporarily interrupted.
+        b.setOngoing(Engine.active)
         b.setVisibility(Notification.VISIBILITY_PUBLIC)
         b.addAction(act(android.R.drawable.ic_media_previous, "Prev", A_PREV))
         b.addAction(
