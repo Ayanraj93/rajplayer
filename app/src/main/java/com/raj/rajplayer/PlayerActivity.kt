@@ -77,6 +77,9 @@ open class PlayerActivity : Activity() {
     private var audioSettingsAnimator: ValueAnimator? = null
     private var playerGearAnimator: ValueAnimator? = null
     private var playerSettingsGear: TextView? = null
+    private var headphoneButton: TextView? = null
+    private var headphoneRgbAnimator: ValueAnimator? = null
+    private var headphoneBlinkAnimator: ValueAnimator? = null
     private val controlRgbTargets = ArrayList<(Int) -> Unit>()
     private val controlRgbTick = object : Runnable {
         override fun run() {
@@ -206,10 +209,46 @@ open class PlayerActivity : Activity() {
         t.gravity = Gravity.CENTER
         t.setPadding(dp(10), dp(8), dp(10), dp(8))
         t.setOnClickListener { f(t) }
-        if (Prefs.themeMode(this) == "rgb" && !Prefs.hasOverride(this, Prefs.K_ICON)) {
+        if (sym != "\uD83C\uDFA7" && Prefs.themeMode(this) == "rgb" && !Prefs.hasOverride(this, Prefs.K_ICON)) {
             controlRgbTargets.add { c -> t.setTextColor(c) }
         }
         return t
+    }
+
+    private fun startHeadphoneAnimations() {
+        val icon = headphoneButton ?: return
+        headphoneRgbAnimator?.cancel()
+        headphoneBlinkAnimator?.cancel()
+
+        headphoneRgbAnimator = ValueAnimator.ofArgb(
+            Color.RED, Color.MAGENTA, Color.BLUE,
+            Color.CYAN, Color.GREEN, Color.YELLOW, Color.RED
+        ).apply {
+            duration = 4200L
+            repeatCount = ValueAnimator.INFINITE
+            addUpdateListener {
+                icon.setTextColor(it.animatedValue as Int)
+            }
+            start()
+        }
+
+        headphoneBlinkAnimator = ValueAnimator.ofFloat(0.82f, 1f).apply {
+            duration = 1100L
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+            addUpdateListener {
+                icon.alpha = it.animatedValue as Float
+            }
+            start()
+        }
+    }
+
+    private fun stopHeadphoneAnimations() {
+        headphoneRgbAnimator?.cancel()
+        headphoneRgbAnimator = null
+        headphoneBlinkAnimator?.cancel()
+        headphoneBlinkAnimator = null
+        headphoneButton?.alpha = 1f
     }
 
     @Suppress("DEPRECATION")
@@ -1050,10 +1089,22 @@ open class PlayerActivity : Activity() {
         titleTv.maxLines = 1
         titleTv.ellipsize = TextUtils.TruncateAt.END
         topBar.addView(titleTv, LinearLayout.LayoutParams(0, WC, 1f))
-        topBar.addView(ib("\u2139\uFE0F", 20f) {
+        val infoButton = ib("\u2139\uFE0F", 20f) {
             showInfo()
             showControls()
-        })
+        }
+        infoButton.setOnClickListener {
+            infoButton.animate().cancel()
+            infoButton.rotation = 0f
+            infoButton.animate().rotationBy(360f).setDuration(650L).start()
+            showInfo()
+            showControls()
+        }
+        infoButton.setOnLongClickListener {
+            decoderDialog()
+            true
+        }
+        topBar.addView(infoButton)
         topBar.addView(ib("\uD83D\uDD04", 20f) {
             requestedOrientation =
                 if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
@@ -1061,9 +1112,25 @@ open class PlayerActivity : Activity() {
                 else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             showControls()
         })
-        topBar.addView(ib("\uD83C\uDFA7", 20f) {
+        val headphone = ib("\uD83C\uDFA7", 20f) {
             enterAudioMode()
-        })
+        }
+        headphone.minWidth = dp(48)
+        headphone.minHeight = dp(48)
+        headphone.setPadding(dp(12), dp(10), dp(12), dp(10))
+        headphone.setOnLongClickListener {
+            Engine.bgAudio = !Engine.bgAudio
+            Prefs.setBgAudio(this, Engine.bgAudio)
+            if (Engine.bgAudio && Engine.isPlaying()) {
+                PlaybackService.start(this)
+            } else if (!Engine.bgAudio) {
+                PlaybackService.stop(this)
+            }
+            showMsg("Background audio " + onOff(Engine.bgAudio))
+            true
+        }
+        headphoneButton = headphone
+        topBar.addView(headphone)
         root.addView(topBar, FrameLayout.LayoutParams(MP, WC, Gravity.TOP))
 
         // ---- bottom controls ----
@@ -1347,10 +1414,12 @@ open class PlayerActivity : Activity() {
                 start()
             }
         }
+        startHeadphoneAnimations()
         hideBars()
     }
 
     override fun onPause() {
+        stopHeadphoneAnimations()
         playerGearAnimator?.cancel()
         playerGearAnimator = null
         ui.removeCallbacks(controlRgbTick)
@@ -1367,6 +1436,7 @@ open class PlayerActivity : Activity() {
     }
 
     override fun onDestroy() {
+        stopHeadphoneAnimations()
         titleRgbAnimator?.cancel()
         titleRgbAnimator = null
         titleRgbShader = null
