@@ -254,7 +254,7 @@ class Av1Engine(context: Context) {
         synchronized(lock) {
             if (!isInitialized) return false
             return try {
-                mpv?.commandWithResult(args) == 0
+                mpv?.commandWithResult(Array(args.size) { args[it] }) == 0
             } catch (e: Exception) {
                 Log.e("RajPlayer-MPV", "Command failed: ${args.firstOrNull()}", e)
                 false
