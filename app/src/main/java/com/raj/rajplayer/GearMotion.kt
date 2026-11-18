@@ -4,11 +4,14 @@ import android.animation.Animator
 import android.animation.AnimatorListenerAdapter
 import android.animation.ValueAnimator
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
+import android.view.View
 import android.view.animation.AccelerateDecelerateInterpolator
 import android.view.animation.LinearInterpolator
+import android.widget.ImageView
 import android.widget.TextView
 
-class GearMotion(private val view: TextView) {
+class GearMotion(private val view: View) {
     private var rotationAnimator: ValueAnimator? = null
     private var colorAnimator: ValueAnimator? = null
     private var pulseAnimator: ValueAnimator? = null
@@ -24,19 +27,15 @@ class GearMotion(private val view: TextView) {
 
     fun tap() {
         if (stopped) return
-
         generation++
         val token = generation
         rotationAnimator?.cancel()
-
         val startAngle = view.rotation
         rotationAnimator = ValueAnimator.ofFloat(startAngle, startAngle + 360f).apply {
             duration = 650L
             interpolator = LinearInterpolator()
             addUpdateListener {
-                if (!stopped && token == generation) {
-                    view.rotation = it.animatedValue as Float
-                }
+                if (!stopped && token == generation) view.rotation = it.animatedValue as Float
             }
             addListener(object : AnimatorListenerAdapter() {
                 override fun onAnimationEnd(animation: Animator) {
@@ -51,16 +50,13 @@ class GearMotion(private val view: TextView) {
         generation++
         val token = generation
         rotationAnimator?.cancel()
-
         val startAngle = view.rotation
         rotationAnimator = ValueAnimator.ofFloat(startAngle, startAngle + 360f).apply {
             duration = 5000L
             repeatCount = ValueAnimator.INFINITE
             interpolator = LinearInterpolator()
             addUpdateListener {
-                if (!stopped && token == generation) {
-                    view.rotation = it.animatedValue as Float
-                }
+                if (!stopped && token == generation) view.rotation = it.animatedValue as Float
             }
             start()
         }
@@ -77,8 +73,17 @@ class GearMotion(private val view: TextView) {
             interpolator = LinearInterpolator()
             addUpdateListener {
                 val c = it.animatedValue as Int
-                view.setTextColor(c)
-                view.setShadowLayer(7f * density, 0f, 0f, c)
+                if (view is ImageView) {
+                    view.setColorFilter(c)
+                    view.background = GradientDrawable().apply {
+                        shape = GradientDrawable.OVAL
+                        setColor(Color.argb(24, Color.red(c), Color.green(c), Color.blue(c)))
+                        setStroke((1f * density).toInt().coerceAtLeast(1), c)
+                    }
+                } else if (view is TextView) {
+                    view.setTextColor(c)
+                    view.setShadowLayer(7f * density, 0f, 0f, c)
+                }
             }
             start()
         }
@@ -100,15 +105,18 @@ class GearMotion(private val view: TextView) {
     fun stop() {
         stopped = true
         generation++
-
         rotationAnimator?.cancel()
         rotationAnimator = null
         colorAnimator?.cancel()
         colorAnimator = null
         pulseAnimator?.cancel()
         pulseAnimator = null
-
         view.alpha = 1f
-        view.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+        if (view is ImageView) {
+            view.clearColorFilter()
+            view.background = null
+        } else if (view is TextView) {
+            view.setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+        }
     }
 }

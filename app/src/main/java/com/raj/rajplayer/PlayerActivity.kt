@@ -32,6 +32,7 @@ import android.view.ViewConfiguration
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.FrameLayout
+import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.SeekBar
 import android.widget.TextView
@@ -76,11 +77,11 @@ open class PlayerActivity : Activity() {
     private var lastPlayingState: Boolean? = null
     private var audioSettingsAnimator: ValueAnimator? = null
     private var playerGearAnimator: ValueAnimator? = null
-    private var playerSettingsGear: TextView? = null
+    private var playerSettingsGear: View? = null
     private var audioSettingsGear: TextView? = null
     private var playerGearMotion: GearMotion? = null
     private var audioGearMotion: GearMotion? = null
-    private var headphoneButton: TextView? = null
+    private var headphoneButton: ImageView? = null
     private var headphoneRgbAnimator: ValueAnimator? = null
     private var headphoneBlinkAnimator: ValueAnimator? = null
     private var infoGlowAnimator: ValueAnimator? = null
@@ -234,7 +235,7 @@ open class PlayerActivity : Activity() {
             duration = 4200L
             repeatCount = ValueAnimator.INFINITE
             addUpdateListener {
-                icon.setTextColor(it.animatedValue as Int)
+                icon.setColorFilter(it.animatedValue as Int)
             }
             start()
         }
@@ -255,7 +256,7 @@ open class PlayerActivity : Activity() {
         headphoneRgbAnimator = null
         headphoneBlinkAnimator?.cancel()
         headphoneBlinkAnimator = null
-        headphoneButton?.alpha = 1f
+        headphoneButton?.apply { alpha = 1f; clearColorFilter() }
     }
 
     private fun makeSoftIconGlow(view: TextView): ValueAnimator {
@@ -1167,12 +1168,15 @@ open class PlayerActivity : Activity() {
         }
         rotateButtonView = rotateButton
         topBar.addView(rotateButton)
-        val headphone = ib("\uD83C\uDFA7", 20f) {
-            enterAudioMode()
+        val headphone = ImageView(this).apply {
+            setImageResource(R.drawable.ic_headphones_outline)
+            scaleType = android.widget.ImageView.ScaleType.FIT_CENTER
+            setPadding(dp(12), dp(10), dp(12), dp(10))
+            contentDescription = "Background audio"
+            setOnClickListener { enterAudioMode() }
         }
-        headphone.minWidth = dp(48)
-        headphone.minHeight = dp(48)
-        headphone.setPadding(dp(12), dp(10), dp(12), dp(10))
+        headphone.minimumWidth = dp(48)
+        headphone.minimumHeight = dp(48)
         headphone.setOnLongClickListener {
             Engine.bgAudio = !Engine.bgAudio
             Prefs.setBgAudio(this, Engine.bgAudio)
@@ -1300,10 +1304,20 @@ open class PlayerActivity : Activity() {
         exRow.addView(ib("Sub", 14f) {
             pickTrack("Subtitles", mp.getSpuTracks()) { id -> mp.setSpuTrack(id) }
         })
-        exRow.addView(ib("\u2699\uFE0F", 18f) {
-            playerGearMotion?.tap()
-            showMenu()
-        }.also { playerSettingsGear = it })
+        val playerGear = ImageView(this).apply {
+            setImageResource(R.drawable.ic_settings_gear_outline)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(dp(9), dp(9), dp(9), dp(9))
+            minimumWidth = dp(48)
+            minimumHeight = dp(48)
+            contentDescription = "Player settings"
+            setOnClickListener {
+                playerGearMotion?.tap()
+                showMenu()
+            }
+        }
+        playerSettingsGear = playerGear
+        exRow.addView(playerGear)
         controls.addView(exRow)
         root.addView(controls, FrameLayout.LayoutParams(MP, WC, Gravity.BOTTOM))
 
