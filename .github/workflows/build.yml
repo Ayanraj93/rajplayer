@@ -39,6 +39,23 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y meson ninja-build nasm
           git clone --depth 1 --branch 1.11.1 https://github.com/androidx/media.git androidx-media
+          python - <<'PYFIX'
+          from pathlib import Path
+          p = Path("androidx-media/build-logic/build.gradle.kts")
+          s = p.read_text()
+          for dep in (
+              "libs.android.gradle.plugin",
+              "libs.android.gradle.api",
+              "libs.kotlin.gradle.plugin",
+          ):
+              old = f"  implementation({dep})"
+              new = old + ' { exclude(group = "org.jetbrains", module = "annotations") }'
+              if s.count(old) != 1:
+                  raise SystemExit(f"STOP: Expected one dependency line: {dep}")
+              s = s.replace(old, new, 1)
+          p.write_text(s)
+          print("AndroidX annotations exclusions applied")
+          PYFIX
           test "$(git -C androidx-media rev-parse HEAD)" = "8c6678b657ede1e7883fc164ef73ed483c7796c3"
           JNI_DIR="androidx-media/libraries/decoder_av1/src/main/jni"
           git clone --depth 1 --branch 1.5.5 https://github.com/videolan/dav1d.git "$JNI_DIR/dav1d"
