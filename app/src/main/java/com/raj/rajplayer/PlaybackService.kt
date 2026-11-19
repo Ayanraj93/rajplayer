@@ -14,6 +14,7 @@ import android.media.session.MediaSession
 import android.media.session.PlaybackState
 import android.os.Build
 import android.os.IBinder
+import android.os.SystemClock
 
 class PlaybackService : Service() {
 
@@ -139,17 +140,20 @@ class PlaybackService : Service() {
         s.setPlaybackState(
             PlaybackState.Builder()
                 .setActions(actions)
-                .setState(if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED, pos, 1f)
+                .setState(if (playing) PlaybackState.STATE_PLAYING else PlaybackState.STATE_PAUSED, pos, 1f, SystemClock.elapsedRealtime())
                 .build()
         )
     }
 
     private fun openPi(): PendingIntent {
-        val cls: Class<*> = if (AudioActivity.visible || AudioActivity.audioModeSession || Prefs.audioModeSession(this) || !Engine.isVideo) AudioActivity::class.java
-            else Orient.videoClass(this, Engine.items.getOrNull(Engine.idx))
+        val isVideo = Engine.isVideo
+        val cls: Class<*> = if (isVideo)
+            Orient.videoClass(this, Engine.items.getOrNull(Engine.idx))
+        else AudioActivity::class.java
         val i = Intent(this, cls)
         i.data = Engine.items.getOrNull(Engine.idx)
         i.putExtra("cont", true)
+        i.putExtra("returnToVideo", isVideo)
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         return PendingIntent.getActivity(this, 1, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
     }

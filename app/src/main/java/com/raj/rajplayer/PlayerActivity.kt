@@ -86,6 +86,7 @@ open class PlayerActivity : Activity() {
     private var headphoneBlinkAnimator: ValueAnimator? = null
     private var infoGlowAnimator: ValueAnimator? = null
     private var rotateGlowAnimator: ValueAnimator? = null
+    private var rotateSpinAnimator: ValueAnimator? = null
     private var infoButtonView: TextView? = null
     private var rotateButtonView: TextView? = null
     private val controlRgbTargets = ArrayList<(Int) -> Unit>()
@@ -180,13 +181,8 @@ open class PlayerActivity : Activity() {
                 // Media3 handles late-frame dropping against its playback clock. Do not
                 // infer decoder failure from wall-clock position deltas or reload on a seek.
                 val dropsNow = Engine.droppedFrames
-                if (Tuning.autoFix(this@PlayerActivity) && dropsNow - lastDropCountSeen >= 8L) {
-                    val now = SystemClock.elapsedRealtime()
+                if (Tuning.autoFix(this@PlayerActivity)) {
                     lastDropCountSeen = dropsNow
-                    if (now - lastDropNoticeAt > 8000L) {
-                        lastDropNoticeAt = now
-                        showMsg("Auto-Fix: Media3 is skipping late frames without restarting playback")
-                    }
                 }
             }
             ui.postDelayed(this, if (rate > 2f) 800L else 500L)
@@ -217,9 +213,7 @@ open class PlayerActivity : Activity() {
         t.gravity = Gravity.CENTER
         t.setPadding(dp(10), dp(8), dp(10), dp(8))
         t.setOnClickListener { f(t) }
-        if (sym != "\uD83C\uDFA7" && !sym.contains("\u2699") && Prefs.themeMode(this) == "rgb" && !Prefs.hasOverride(this, Prefs.K_ICON)) {
-            controlRgbTargets.add { c -> t.setTextColor(c) }
-        }
+        controlRgbTargets.add { c -> t.setTextColor(c) }
         return t
     }
 
@@ -278,17 +272,43 @@ open class PlayerActivity : Activity() {
         }
     }
 
+    private fun makeInfoRgbAnimation(view: TextView): ValueAnimator {
+        return ValueAnimator.ofArgb(
+            Color.RED, Color.MAGENTA, Color.BLUE,
+            Color.CYAN, Color.GREEN, Color.YELLOW, Color.RED
+        ).apply {
+            duration = 4200L
+            repeatCount = ValueAnimator.INFINITE
+            addUpdateListener {
+                val color = it.animatedValue as Int
+                view.setTextColor(color)
+                view.setShadowLayer(dp(5).toFloat(), 0f, 0f, color)
+                view.alpha = 0.82f + 0.18f *
+                    ((kotlin.math.sin(it.animatedFraction * Math.PI * 2) + 1.0) / 2.0).toFloat()
+            }
+        }
+    }
+
     private fun startTopIconGlow() {
         stopTopIconGlow()
         infoButtonView?.let {
-            infoGlowAnimator = makeSoftIconGlow(it).also { a -> a.start() }
+            infoGlowAnimator = makeInfoRgbAnimation(it).also { a -> a.start() }
         }
-        rotateButtonView?.let {
-            rotateGlowAnimator = makeSoftIconGlow(it).also { a -> a.start() }
+        rotateButtonView?.let { view ->
+            rotateGlowAnimator = makeSoftIconGlow(view).also { a -> a.start() }
+            rotateSpinAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
+                duration = 4200L
+                repeatCount = ValueAnimator.INFINITE
+                interpolator = LinearInterpolator()
+                addUpdateListener { view.rotation = it.animatedValue as Float }
+                start()
+            }
         }
     }
 
     private fun stopTopIconGlow() {
+        rotateSpinAnimator?.cancel()
+        rotateSpinAnimator = null
         infoGlowAnimator?.cancel()
         infoGlowAnimator = null
         rotateGlowAnimator?.cancel()
@@ -677,7 +697,6 @@ open class PlayerActivity : Activity() {
                     1 -> decoderDialog()
                     2 -> {
                         Tuning.setAutoFix(this, !Tuning.autoFix(this))
-                        showMsg("Smart auto-fix " + onOff(Tuning.autoFix(this)))
                     }
                     3 -> Dialogs.eq(this)
                     4 -> Dialogs.boost(this)
@@ -1080,6 +1099,10 @@ open class PlayerActivity : Activity() {
         val firstUri: Uri? = if (cont) Engine.items.getOrNull(Engine.idx) else qUris.getOrNull(qIndex)
 
         Engine.ensure(this)
+        if (intent.getBooleanExtra("returnToVideo", false)) {
+            Prefs.setAudioModeSession(this, false)
+            AudioActivity.audioModeSession = false
+        }
         Engine.bgAudio = Prefs.bgAudio(this)
         slop = ViewConfiguration.get(this).scaledTouchSlop
 
@@ -1141,7 +1164,7 @@ open class PlayerActivity : Activity() {
         titleTv.maxLines = 1
         titleTv.ellipsize = TextUtils.TruncateAt.END
         topBar.addView(titleTv, LinearLayout.LayoutParams(0, WC, 1f))
-        val infoButton = ib("\u2139\uFE0F", 20f) {
+        val infoButton = ib("ⓘ", 23f) {
             showInfo()
             showControls()
         }
@@ -1461,6 +1484,25 @@ open class PlayerActivity : Activity() {
         if (!cont) layout.post { Engine.setQueue(this, qUris, qNames, qIndex, true) } else onItem()
         showControls()
         ui.post(tick)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("returnToVideo", false)) {
+            Prefs.setAudioModeSession(this, false)
+            AudioActivity.audioModeSession = false
+            Bg.restoreVideo()
+            if (::layout.isInitialized) {
+                audioMode = false
+                audioModePanel.visibility = View.GONE
+                layout.visibility = View.VISIBLE
+                touchView.visibility = View.VISIBLE
+                atomic?.visibility = View.VISIBLE
+                attachVideo()
+                showControls()
+            }
+        }
     }
 
     override fun onResume() {

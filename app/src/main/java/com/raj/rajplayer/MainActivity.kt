@@ -81,6 +81,7 @@ class MainActivity : Activity() {
     private var shown: List<V> = emptyList()
     private var inSettings = false
     private var asked = false
+    private var permissionGrantedAtPause = false
     private var dirty = true
     private var tab = 0
     private var openFolder: String? = null
@@ -152,9 +153,13 @@ class MainActivity : Activity() {
     override fun onResume() {
         super.onResume()
         if (isFinishing) return
-        if (!hasPerm() && !asked) {
+        if (!hasPerm() && (!asked || permissionGrantedAtPause)) {
             asked = true
+            permissionGrantedAtPause = false
             reqPerms()
+        } else if (hasPerm()) {
+            asked = false
+            permissionGrantedAtPause = true
         }
         dirty = true
         if (inSettings) {
@@ -169,6 +174,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
+        permissionGrantedAtPause = hasPerm()
         stopSettingsGearAnimation()
         super.onPause()
         ui.removeCallbacks(miniTick)

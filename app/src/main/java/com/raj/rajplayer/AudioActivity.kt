@@ -58,6 +58,9 @@ class AudioActivity : Activity() {
     private lateinit var playCircle: GradientDrawable
     private var gearAnimator: ValueAnimator? = null
     private var settingsGearMotion: GearMotion? = null
+    private var backgroundTitleView: TextView? = null
+    private var backgroundTitleRgbAnimator: ValueAnimator? = null
+    private var backgroundTitleBlinkAnimator: ValueAnimator? = null
     private var wallView: ImageView? = null
     private var wallDim: View? = null
 
@@ -91,6 +94,43 @@ class AudioActivity : Activity() {
                 ui.postDelayed(this, 70)
             }
         }
+    }
+
+    private fun startBackgroundTitleAnimation() {
+        val title = backgroundTitleView ?: return
+        if (title.text != "BACKGROUND PLAY") return
+        backgroundTitleRgbAnimator?.cancel()
+        backgroundTitleBlinkAnimator?.cancel()
+
+        backgroundTitleRgbAnimator = ValueAnimator.ofArgb(
+            Color.RED, Color.MAGENTA, Color.BLUE,
+            Color.CYAN, Color.GREEN, Color.YELLOW, Color.RED
+        ).apply {
+            duration = 4200L
+            repeatCount = ValueAnimator.INFINITE
+            addUpdateListener {
+                title.setTextColor(it.animatedValue as Int)
+            }
+            start()
+        }
+
+        backgroundTitleBlinkAnimator = ValueAnimator.ofFloat(0.82f, 1f).apply {
+            duration = 1100L
+            repeatCount = ValueAnimator.INFINITE
+            repeatMode = ValueAnimator.REVERSE
+            addUpdateListener {
+                title.alpha = it.animatedValue as Float
+            }
+            start()
+        }
+    }
+
+    private fun stopBackgroundTitleAnimation() {
+        backgroundTitleRgbAnimator?.cancel()
+        backgroundTitleRgbAnimator = null
+        backgroundTitleBlinkAnimator?.cancel()
+        backgroundTitleBlinkAnimator = null
+        backgroundTitleView?.alpha = 1f
     }
 
     private fun dp(v: Int) = (v * resources.displayMetrics.density).toInt()
@@ -259,6 +299,10 @@ class AudioActivity : Activity() {
         hdr.textSize = 13f
         hdr.setTextColor(tc)
         hdr.gravity = Gravity.CENTER
+        hdr.setSingleLine(true)
+        hdr.setHorizontallyScrolling(true)
+        backgroundTitleView = hdr
+        hdr.translationY = -dp(5).toFloat()
         top.addView(hdr, LinearLayout.LayoutParams(0, WC, 1f))
         val settingsGear = ib("\u2699", 22f, ic) { showStyleCenter() }.also { gearButton = it }
         settingsGear.setOnClickListener {
@@ -634,6 +678,7 @@ class AudioActivity : Activity() {
         if (Engine.active && Engine.isPlaying()) PlaybackService.start(this)
         settingsGearMotion?.stop()
         settingsGearMotion = GearMotion(gearButton).also { it.start() }
+        startBackgroundTitleAnimation()
         ui.post(tick)
         ui.removeCallbacks(rgbTick)
         if (rgbTargets.isNotEmpty() && audioRgbEnabled()) ui.post(rgbTick)
@@ -644,6 +689,7 @@ class AudioActivity : Activity() {
         visible = false
         settingsGearMotion?.stop()
         settingsGearMotion = null
+        stopBackgroundTitleAnimation()
         super.onPause()
         ui.removeCallbacks(tick)
         ui.removeCallbacks(rgbTick)
@@ -672,6 +718,8 @@ class AudioActivity : Activity() {
         // Keep the persisted session flag while background audio continues; Back to Video clears it.
         settingsGearMotion?.stop()
         settingsGearMotion = null
+        stopBackgroundTitleAnimation()
+        backgroundTitleView = null
         super.onDestroy()
         ui.removeCallbacksAndMessages(null)
         if (Engine.listener === lis) Engine.listener = null

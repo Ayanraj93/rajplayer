@@ -5,6 +5,12 @@ cd "$ROOT"
 
 grep -Fq 'val media3Version = "1.11.1"' app/build.gradle.kts
 grep -Fq 'androidx.media3:media3-exoplayer:$media3Version' app/build.gradle.kts
+grep -Fq 'androidx.media3:media3-decoder-av1:$media3Version' app/build.gradle.kts
+grep -Fq 'DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON' app/src/main/java/com/raj/rajplayer/Engine.kt
+grep -Fq 'includeMedia3(file("androidx-media"))' settings.gradle.kts
+grep -Fq 'nativelib/arm64-v8a/libdav1d.a' .github/workflows/build.yml
+grep -Fq 'nativelib/armeabi-v7a/libdav1d.a' .github/workflows/build.yml
+grep -Fq 'Class.forName("androidx.media3.decoder.av1.Libdav1dVideoRenderer")' androidx-media/libraries/exoplayer/src/main/java/androidx/media3/exoplayer/DefaultRenderersFactory.java
 grep -q 'ExoPlayer.Builder' app/src/main/java/com/raj/rajplayer/Engine.kt
 grep -q 'setVideoSurfaceView' app/src/main/java/com/raj/rajplayer/MediaPlayer.kt
 grep -q 'setEnableAudioOutputPlaybackParameters(false)' app/src/main/java/com/raj/rajplayer/Engine.kt

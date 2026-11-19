@@ -33,6 +33,22 @@ jobs:
           ln -sfn android-37.0 "$ANDROID_HOME/platforms/android-37"
           test -f "$ANDROID_HOME/platforms/android-37/android.jar"
 
+      - name: Prepare Media3 AV1 decoder
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y meson ninja-build nasm
+          git clone --depth 1 --branch 1.11.1 https://github.com/androidx/media.git androidx-media
+          test "$(git -C androidx-media rev-parse HEAD)" = "8c6678b657ede1e7883fc164ef73ed483c7796c3"
+          JNI_DIR="androidx-media/libraries/decoder_av1/src/main/jni"
+          git clone --depth 1 --branch 1.5.5 https://github.com/videolan/dav1d.git "$JNI_DIR/dav1d"
+          git clone --depth 1 --branch v0.9.0 https://github.com/google/cpu_features.git "$JNI_DIR/cpu_features"
+          test "$(git -C "$JNI_DIR/dav1d" rev-parse HEAD)" = "6c7bee685677fd997a431302be4fea8ea4017606"
+          test "$(git -C "$JNI_DIR/cpu_features" rev-parse HEAD)" = "ba4bffa86cbb5456bdb34426ad22b9551278e2c0"
+          bash androidx-media/libraries/decoder_av1/src/main/jni/build_dav1d.sh "$PWD/androidx-media/libraries/decoder_av1/src/main" "$ANDROID_HOME/ndk/27.2.12479018" linux-x86_64
+          test -f "$JNI_DIR/nativelib/arm64-v8a/libdav1d.a"
+          test -f "$JNI_DIR/nativelib/armeabi-v7a/libdav1d.a"
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
         with:

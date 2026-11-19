@@ -93,7 +93,7 @@ object Engine {
             .setBufferDurationsMs(12000, 45000, 2500, 4000)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
-        val renderers = DefaultRenderersFactory(app)
+        val renderers = DefaultRenderersFactory(app, DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .forceEnableMediaCodecAsynchronousQueueing()
             .setEnableDecoderFallback(true)
             // Force Media3's Sonic time-stretch path instead of device-specific AudioTrack speed.
@@ -239,7 +239,7 @@ object Engine {
         val p = mp ?: return
         if (p.getTime() > 3000 || idx == 0) p.setTime(0) else loadAt(ctx, idx - 1)
     }
-    fun seekTo(ms: Long) { mp?.setTime(ms) }
+    fun seekTo(ms: Long) { mp?.setTime(ms); notifyChanged() }
     fun saveProgress() {
         val p = mp ?: return
         if (!active || items.isEmpty()) return

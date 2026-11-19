@@ -65,6 +65,7 @@ kotlin {
 dependencies {
     val media3Version = "1.11.1"
     implementation("androidx.media3:media3-exoplayer:$media3Version")
+    implementation("androidx.media3:media3-decoder-av1:$media3Version")
     implementation("io.github.midasvo:libmpv:1.2.0")
     implementation("androidx.media3:media3-common:$media3Version")
     implementation("androidx.media3:media3-exoplayer-hls:$media3Version")
