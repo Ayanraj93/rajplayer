@@ -54,6 +54,13 @@ jobs:
                   raise SystemExit(f"STOP: Expected one dependency line: {dep}")
               s = s.replace(old, new, 1)
           p.write_text(s)
+          catalog = Path("androidx-media/gradle/libs.versions.toml")
+          versions = catalog.read_text()
+          old_version = 'androidGradlePlugin = "9.0.1"'
+          if versions.count(old_version) != 1:
+              raise SystemExit("STOP: Expected exactly one AndroidX AGP 9.0.1 entry")
+          catalog.write_text(versions.replace(old_version, 'androidGradlePlugin = "9.1.1"', 1))
+          print("AndroidX AGP aligned to RajPlayer 9.1.1")
           print("AndroidX annotations exclusions applied")
           PYFIX
           test "$(git -C androidx-media rev-parse HEAD)" = "8c6678b657ede1e7883fc164ef73ed483c7796c3"
