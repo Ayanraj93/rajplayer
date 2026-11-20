@@ -93,7 +93,8 @@ object Engine {
             .setBufferDurationsMs(12000, 45000, 2500, 4000)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
-        val renderers = DefaultRenderersFactory(app, DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+        val renderers = DefaultRenderersFactory(app)
+            .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .forceEnableMediaCodecAsynchronousQueueing()
             .setEnableDecoderFallback(true)
             // Force Media3's Sonic time-stretch path instead of device-specific AudioTrack speed.
