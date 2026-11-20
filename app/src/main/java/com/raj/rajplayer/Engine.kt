@@ -19,8 +19,12 @@ import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackParameters
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.DefaultLoadControl
+import androidx.media3.common.MimeTypes
+import androidx.media3.common.PlaybackException
+import androidx.media3.decoder.av1.Dav1dLibrary
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.mediacodec.MediaCodecSelector
 import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.common.util.UnstableApi
 
@@ -44,6 +48,8 @@ object Engine {
         private set
     @Volatile var videoDecoderName: String = "Not initialized"
         private set
+    @Volatile private var forceDav1dForCurrentItem: Boolean = false
+    @Volatile private var av1FallbackTried: Boolean = false
 
     private lateinit var app: Context
     private val main = Handler(Looper.getMainLooper())
@@ -93,8 +99,26 @@ object Engine {
             .setBufferDurationsMs(12000, 45000, 2500, 4000)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
+        val av1AwareSelector = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
+            val codecs = MediaCodecSelector.DEFAULT.getDecoderInfos(
+                mimeType,
+                requiresSecureDecoder,
+                requiresTunnelingDecoder
+            )
+            if (MimeTypes.VIDEO_AV1.equals(mimeType, ignoreCase = true) && Dav1dLibrary.isAvailable()) {
+                if (forceDav1dForCurrentItem) {
+                    emptyList()
+                } else {
+                    val hwCodecs = codecs.filter { it.hardwareAccelerated && !it.softwareOnly }
+                    hwCodecs
+                }
+            } else {
+                codecs
+            }
+        }
         val renderers = DefaultRenderersFactory(app)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
+            .setMediaCodecSelector(av1AwareSelector)
             .forceEnableMediaCodecAsynchronousQueueing()
             .setEnableDecoderFallback(true)
             // Force Media3's Sonic time-stretch path instead of device-specific AudioTrack speed.
@@ -123,9 +147,28 @@ object Engine {
                 notifyChanged()
             }
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                val isDecoderFailure = error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
+                    error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED
+                if (isDecoderFailure && isVideo && !av1FallbackTried && Dav1dLibrary.isAvailable() && items.isNotEmpty()) {
+                    av1FallbackTried = true
+                    forceDav1dForCurrentItem = true
+                    val retryPos = exo.currentPosition.coerceAtLeast(0L)
+                    val uri = items[idx]
+                    videoDecoderName = "Switching to dav1d AV1 fallback…"
+                    val retryItem = MediaItem.Builder().setUri(uri).setMediaId(uri.toString()).build()
+                    exo.setMediaItem(retryItem, retryPos)
+                    exo.prepare()
+                    exo.playWhenReady = true
+                    exo.play()
+                    notifyChanged()
+                    return
+                }
                 active = false
                 releaseLocks()
-                Toast.makeText(app, "Playback error: ${error.errorCodeName}", Toast.LENGTH_LONG).show()
+                val detail = error.cause?.message?.take(120) ?: error.message?.take(120) ?: ""
+                val dav1dState = if (Dav1dLibrary.isAvailable()) "dav1d:on" else "dav1d:off"
+                videoDecoderName = "Error (${error.errorCodeName}, $dav1dState): $detail"
+                Toast.makeText(app, "Playback error: ${error.errorCodeName} ($dav1dState) $detail", Toast.LENGTH_LONG).show()
                 notifyChanged()
             }
         })
@@ -178,6 +221,8 @@ object Engine {
         title = names.getOrNull(idx) ?: nameOf(app, uri)
         val resume = Prefs.pos(app, uri.toString())
         Prefs.setLastPlayedUri(app, uri.toString())
+        forceDav1dForCurrentItem = false
+        av1FallbackTried = false
         videoDecoderName = "Initializing MediaCodec…"
         ended = false
         resumeOnFocus = false
