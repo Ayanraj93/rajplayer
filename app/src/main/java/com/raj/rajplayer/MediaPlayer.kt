@@ -186,6 +186,12 @@ class MediaPlayer(val player: ExoPlayer) {
         host = null
     }
 
+    fun recreateSurface() {
+        val container = host ?: return
+        val grading = texture != null
+        attachViews(container, null, true, grading)
+    }
+
     fun setVideoScale(scale: ScaleType) {
         scaleType = scale
 

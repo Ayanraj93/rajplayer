@@ -155,6 +155,8 @@ object Engine {
                     val retryPos = exo.currentPosition.coerceAtLeast(0L)
                     val uri = items[idx]
                     videoDecoderName = "Switching to dav1d AV1 fallback…"
+                    exo.stop()
+                    mp?.recreateSurface()
                     val retryItem = MediaItem.Builder().setUri(uri).setMediaId(uri.toString()).build()
                     exo.setMediaItem(retryItem, retryPos)
                     exo.prepare()
@@ -221,6 +223,10 @@ object Engine {
         title = names.getOrNull(idx) ?: nameOf(app, uri)
         val resume = Prefs.pos(app, uri.toString())
         Prefs.setLastPlayedUri(app, uri.toString())
+        val needsFreshSurface = isVideo && (
+            forceDav1dForCurrentItem ||
+            videoDecoderName.contains("dav1d", ignoreCase = true)
+        )
         forceDav1dForCurrentItem = false
         av1FallbackTried = false
         videoDecoderName = "Initializing MediaCodec…"
@@ -230,6 +236,10 @@ object Engine {
         droppedFrames = 0L
         renderedFrames = 0L
         try {
+            if (needsFreshSurface) {
+                p.player.stop()
+                p.recreateSurface()
+            }
             val item = MediaItem.Builder().setUri(uri).setMediaId(uri.toString()).build()
             p.player.setMediaItem(item, resume.coerceAtLeast(0L))
             p.player.setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
