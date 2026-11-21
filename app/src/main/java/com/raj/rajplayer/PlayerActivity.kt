@@ -406,7 +406,7 @@ open class PlayerActivity : Activity() {
             showPausedControls()
             return
         }
-        showBars()
+        hideBars()
         if (locked) {
             lockBtn.visibility = View.VISIBLE
         } else {
