@@ -55,7 +55,7 @@ open class PlayerActivity : Activity() {
     private lateinit var touchView: View
     private lateinit var topBar: LinearLayout
     private lateinit var controls: LinearLayout
-    private lateinit var lockBtn: TextView
+    private lateinit var lockBtn: ImageView
     private lateinit var titleTv: TextView
     private var titleRgbAnimator: ValueAnimator? = null
     private var titleRgbShader: LinearGradient? = null
@@ -86,9 +86,10 @@ open class PlayerActivity : Activity() {
     private var headphoneBlinkAnimator: ValueAnimator? = null
     private var infoGlowAnimator: ValueAnimator? = null
     private var rotateGlowAnimator: ValueAnimator? = null
-    private var rotateSpinAnimator: ValueAnimator? = null
+    private var lockRgbAnimator: ValueAnimator? = null
+    private var lockBlinkAnimator: ValueAnimator? = null
     private var infoButtonView: TextView? = null
-    private var rotateButtonView: TextView? = null
+    private var rotateButtonView: ImageView? = null
     private val controlRgbTargets = ArrayList<(Int) -> Unit>()
     private val controlRgbTick = object : Runnable {
         override fun run() {
@@ -295,31 +296,61 @@ open class PlayerActivity : Activity() {
             infoGlowAnimator = makeInfoRgbAnimation(it).also { a -> a.start() }
         }
         rotateButtonView?.let { view ->
-            rotateGlowAnimator = makeSoftIconGlow(view).also { a -> a.start() }
-            rotateSpinAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
+            view.rotation = 0f
+            view.alpha = 1f
+            rotateGlowAnimator = ValueAnimator.ofArgb(
+                Color.RED, Color.MAGENTA, Color.BLUE,
+                Color.CYAN, Color.GREEN, Color.YELLOW, Color.RED
+            ).apply {
                 duration = 4200L
                 repeatCount = ValueAnimator.INFINITE
                 interpolator = LinearInterpolator()
-                addUpdateListener { view.rotation = it.animatedValue as Float }
+                addUpdateListener { view.setColorFilter(it.animatedValue as Int) }
+                start()
+            }
+        }
+        if (::lockBtn.isInitialized) {
+            lockRgbAnimator = ValueAnimator.ofArgb(
+                Color.RED, Color.MAGENTA, Color.BLUE,
+                Color.CYAN, Color.GREEN, Color.YELLOW, Color.RED
+            ).apply {
+                duration = 4200L
+                repeatCount = ValueAnimator.INFINITE
+                interpolator = LinearInterpolator()
+                addUpdateListener { lockBtn.setColorFilter(it.animatedValue as Int) }
+                start()
+            }
+            lockBlinkAnimator = ValueAnimator.ofFloat(0.35f, 1f).apply {
+                duration = 900L
+                repeatCount = ValueAnimator.INFINITE
+                repeatMode = ValueAnimator.REVERSE
+                addUpdateListener { lockBtn.alpha = it.animatedValue as Float }
                 start()
             }
         }
     }
 
     private fun stopTopIconGlow() {
-        rotateSpinAnimator?.cancel()
-        rotateSpinAnimator = null
         infoGlowAnimator?.cancel()
         infoGlowAnimator = null
         rotateGlowAnimator?.cancel()
         rotateGlowAnimator = null
+        lockRgbAnimator?.cancel()
+        lockRgbAnimator = null
+        lockBlinkAnimator?.cancel()
+        lockBlinkAnimator = null
         infoButtonView?.apply {
             setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
             alpha = 1f
         }
         rotateButtonView?.apply {
-            setShadowLayer(0f, 0f, 0f, Color.TRANSPARENT)
+            clearColorFilter()
+            rotation = 0f
             alpha = 1f
+        }
+        if (::lockBtn.isInitialized) {
+            lockBtn.clearColorFilter()
+            lockBtn.alpha = 1f
         }
     }
 
@@ -941,18 +972,10 @@ open class PlayerActivity : Activity() {
             override fun onDown(e: MotionEvent): Boolean = true
 
             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
-                if (Engine.isPlaying()) {
-                    if (!controlsVisible()) {
-                        showControls()
-                    } else if (systemBarsVisible) {
-                        hideBars()
-                        ui.removeCallbacks(hideRun)
-                        ui.postDelayed(hideRun, 5000L)
-                    } else {
-                        hideControls()
-                    }
+                if (controlsVisible()) {
+                    hideControls()
                 } else {
-                    if (systemBarsVisible) hideBars() else showBars()
+                    showControls()
                 }
                 return true
             }
@@ -971,7 +994,7 @@ open class PlayerActivity : Activity() {
                 } else if (e.x > w * 2f / 3f) {
                     seekBy(sMs)
                 } else {
-                    if (controlsVisible()) hideControls() else showControls()
+                    togglePlay()
                 }
                 return true
             }
@@ -1155,7 +1178,7 @@ open class PlayerActivity : Activity() {
         // ---- top bar: back | title | info | rotate ----
         topBar = LinearLayout(this)
         topBar.gravity = Gravity.CENTER_VERTICAL
-        topBar.setBackgroundColor(Prefs.videoBarColor(this))
+        topBar.setBackgroundColor(Color.TRANSPARENT)
         topBar.setPadding(dp(20), dp(8), dp(20), dp(8))
         topBar.addView(ib("\u2190", 22f) { finish() })
         titleTv = TextView(this)
@@ -1182,12 +1205,20 @@ open class PlayerActivity : Activity() {
         infoButtonView = infoButton
         topBar.addView(infoButton)
 
-        val rotateButton = ib("\uD83D\uDD04", 20f) {
-            requestedOrientation =
-                if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
-                    ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
-                else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
-            showControls()
+        val rotateButton = ImageView(this).apply {
+            setImageResource(R.drawable.ic_rotate_screen_vector)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(dp(11), dp(10), dp(11), dp(10))
+            minimumWidth = dp(46)
+            minimumHeight = dp(46)
+            contentDescription = "Rotate screen"
+            setOnClickListener {
+                requestedOrientation =
+                    if (resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE)
+                        ActivityInfo.SCREEN_ORIENTATION_SENSOR_PORTRAIT
+                    else ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+                showControls()
+            }
         }
         rotateButtonView = rotateButton
         topBar.addView(rotateButton)
@@ -1218,7 +1249,7 @@ open class PlayerActivity : Activity() {
         // ---- bottom controls ----
         controls = LinearLayout(this)
         controls.orientation = LinearLayout.VERTICAL
-        controls.setBackgroundColor(Prefs.videoBarColor(this))
+        controls.setBackgroundColor(Color.TRANSPARENT)
         controls.setPadding(dp(20), dp(4), dp(20), dp(12))
 
         val seekRow = LinearLayout(this)
@@ -1328,7 +1359,7 @@ open class PlayerActivity : Activity() {
             pickTrack("Subtitles", mp.getSpuTracks()) { id -> mp.setSpuTrack(id) }
         })
         val playerGear = ImageView(this).apply {
-            setImageResource(R.drawable.ic_settings_gear_outline)
+            setImageResource(R.drawable.ic_settings_wheel_vector)
             scaleType = ImageView.ScaleType.FIT_CENTER
             setPadding(dp(9), dp(9), dp(9), dp(9))
             minimumWidth = dp(48)
@@ -1344,26 +1375,34 @@ open class PlayerActivity : Activity() {
         controls.addView(exRow)
         root.addView(controls, FrameLayout.LayoutParams(MP, WC, Gravity.BOTTOM))
 
-        lockBtn = ib("\uD83D\uDD13", 22f) { b ->
-            if (locked) {
-                showMsg("Long-press to unlock")
-            } else {
-                locked = true
-                b.text = "\uD83D\uDD12"
-                topBar.visibility = View.GONE
-                controls.visibility = View.GONE
-                showMsg("Screen locked")
-            }
-            showControls()
-        }
-        lockBtn.setOnLongClickListener {
-            if (locked) {
-                locked = false
-                lockBtn.text = "\uD83D\uDD13"
-                showMsg("Screen unlocked")
+        lockBtn = ImageView(this).apply {
+            setImageResource(R.drawable.ic_lock_open_vector)
+            scaleType = ImageView.ScaleType.FIT_CENTER
+            setPadding(dp(10), dp(10), dp(10), dp(10))
+            minimumWidth = dp(46)
+            minimumHeight = dp(46)
+            contentDescription = "Lock screen"
+            setOnClickListener {
+                if (locked) {
+                    showMsg("Long-press to unlock")
+                } else {
+                    locked = true
+                    setImageResource(R.drawable.ic_lock_closed_vector)
+                    topBar.visibility = View.GONE
+                    controls.visibility = View.GONE
+                    showMsg("Screen locked")
+                }
                 showControls()
             }
-            true
+            setOnLongClickListener {
+                if (locked) {
+                    locked = false
+                    setImageResource(R.drawable.ic_lock_open_vector)
+                    showMsg("Screen unlocked")
+                    showControls()
+                }
+                true
+            }
         }
         val llp = FrameLayout.LayoutParams(WC, WC, Gravity.START or Gravity.CENTER_VERTICAL)
         llp.setMargins(dp(20), 0, 0, 0)
@@ -1533,13 +1572,18 @@ open class PlayerActivity : Activity() {
         ui.removeCallbacks(controlRgbTick)
         super.onPause()
         Engine.saveProgress()
-        if (Engine.bgAudio && Engine.isPlaying()) PlaybackService.start(this)
+        val allowVideoBg = Prefs.videoBgPlay(this)
+        if ((allowVideoBg || audioMode || audioChildOpen) && Engine.isPlaying()) {
+            PlaybackService.start(this)
+        }
     }
 
     override fun onStop() {
         super.onStop()
-        if (Engine.isPlaying() && !Engine.bgAudio && !audioChildOpen) {
+        val allowVideoBg = Prefs.videoBgPlay(this)
+        if (Engine.isPlaying() && !allowVideoBg && !audioMode && !audioChildOpen) {
             Engine.pause()
+            if (isFinishing) PlaybackService.stop(this)
         }
     }
 

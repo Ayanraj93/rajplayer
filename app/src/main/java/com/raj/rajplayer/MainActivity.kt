@@ -973,7 +973,7 @@ class MainActivity : Activity() {
     // ================= mini player =================
     private fun refreshMini() {
         if (!::miniBar.isInitialized) return
-        if (!Engine.active || inSettings) {
+        if (!Engine.active || inSettings || !Prefs.showMiniBar(this)) {
             miniBar.visibility = View.GONE
             return
         }
@@ -987,7 +987,7 @@ class MainActivity : Activity() {
         bar.gravity = Gravity.CENTER_VERTICAL
         bar.setPadding(dp(12), dp(4), dp(4), dp(4))
         val g = GradientDrawable()
-        g.setColor(0xEE1A222D.toInt())
+        g.setColor(0x26000000)
         g.setStroke(dp(1), ac)
         g.cornerRadius = dp(14).toFloat()
         bar.background = g
@@ -1447,6 +1447,9 @@ class MainActivity : Activity() {
             showHome()
         })
 
+        // ==== SECTION 1: RAJPLAYER CUSTOMIZATION ====
+        root.addView(label("1. RajPlayer Customization", 18f, ac))
+
         // ---- theme presets ----
         root.addView(label("Theme Presets", 16f, tc))
         val cur = Prefs.themeMode(this)
@@ -1491,13 +1494,26 @@ class MainActivity : Activity() {
         })
         root.addView(spSb)
 
-        // ---- video / playback ----
-        root.addView(label("Video & Playback", 16f, tc))
-        toggle(root, "Auto-rotate to match video", Prefs.autoOrient(this), ac) { Prefs.setAutoOrient(this, !Prefs.autoOrient(this)) }
-        toggle(root, "Background Audio", Prefs.bgAudio(this), ac) {
+        // ==== SECTION 2: BACKGROUND PLAY ====
+        root.addView(label("2. Background Play", 18f, ac))
+        toggle(root, "Video Background Play (on back/exit)", Prefs.videoBgPlay(this), ac) {
+            Prefs.setVideoBgPlay(this, !Prefs.videoBgPlay(this))
+        }
+        toggle(root, "Show Mini-Player Bar (Main Screen)", Prefs.showMiniBar(this), ac) {
+            Prefs.setShowMiniBar(this, !Prefs.showMiniBar(this))
+        }
+        toggle(root, "Background Audio (Audio Mode / Music)", Prefs.bgAudio(this), ac) {
             Prefs.setBgAudio(this, !Prefs.bgAudio(this))
             Engine.bgAudio = Prefs.bgAudio(this)
         }
+        root.addView(label(
+            "Audio Mode and Music Player notifications stay active as before. Turning Video Background Play OFF pauses normal videos when returning to the main list.",
+            12f, tc
+        ))
+
+        // ---- video / playback ----
+        root.addView(label("Video & Playback", 16f, tc))
+        toggle(root, "Auto-rotate to match video", Prefs.autoOrient(this), ac) { Prefs.setAutoOrient(this, !Prefs.autoOrient(this)) }
         root.addView(button("Background Activity (Battery): " + (if (Power.isIgnoring(this)) "ALLOWED \u2705" else "Tap to allow"), ac) {
             Power.request(this)
         })

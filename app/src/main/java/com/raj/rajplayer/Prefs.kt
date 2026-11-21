@@ -212,4 +212,10 @@ object Prefs {
         if (v.isEmpty()) e.remove("bm_" + key) else e.putString("bm_" + key, v.joinToString(","))
         e.apply()
     }
+
+    fun videoBgPlay(c: Context): Boolean = p(c).getBoolean("video_bg_play", false)
+    fun setVideoBgPlay(c: Context, v: Boolean) { p(c).edit().putBoolean("video_bg_play", v).apply() }
+
+    fun showMiniBar(c: Context): Boolean = p(c).getBoolean("show_mini_bar", true)
+    fun setShowMiniBar(c: Context, v: Boolean) { p(c).edit().putBoolean("show_mini_bar", v).apply() }
 }

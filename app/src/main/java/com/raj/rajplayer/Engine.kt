@@ -96,7 +96,8 @@ object Engine {
         registerAudioDeviceCallback()
         mp?.let { return it }
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(12000, 45000, 2500, 4000)
+            .setBufferDurationsMs(4000, 20000, 250, 500)
+            .setBackBuffer(5000, true)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
         val av1AwareSelector = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
