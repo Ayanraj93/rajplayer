@@ -69,6 +69,7 @@ jobs:
           git clone --depth 1 --branch v0.9.0 https://github.com/google/cpu_features.git "$JNI_DIR/cpu_features"
           test "$(git -C "$JNI_DIR/dav1d" rev-parse HEAD)" = "6c7bee685677fd997a431302be4fea8ea4017606"
           test "$(git -C "$JNI_DIR/cpu_features" rev-parse HEAD)" = "ba4bffa86cbb5456bdb34426ad22b9551278e2c0"
+          python3 -c 'from pathlib import Path; p = Path("androidx-media/libraries/decoder_av1/src/main/jni/cpu_features/include/cpu_features_macros.h"); s = p.read_text(); old = "#if defined(__ARM_NEON__)"; new = "#if defined(__ARM_NEON__) || defined(__ARM_NEON) || defined(__aarch64__)"; assert s.count(old) == 1, "NEON macro mismatch"; p.write_text(s.replace(old, new, 1)); print("Patched cpu_features_macros.h for ARM64 NEON")'
           bash androidx-media/libraries/decoder_av1/src/main/jni/build_dav1d.sh "$PWD/androidx-media/libraries/decoder_av1/src/main" "$ANDROID_HOME/ndk/27.2.12479018" linux-x86_64
           test -f "$JNI_DIR/nativelib/arm64-v8a/libdav1d.a"
           test -f "$JNI_DIR/nativelib/armeabi-v7a/libdav1d.a"
