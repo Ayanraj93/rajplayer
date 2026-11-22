@@ -74,6 +74,7 @@ open class PlayerActivity : Activity() {
     private var audioMode = false
     private var audioChildOpen = false
     private var systemBarsVisible = false
+    private var controlAnimsRunning = false
     private var lastPlayingState: Boolean? = null
     private var audioSettingsAnimator: ValueAnimator? = null
     private var playerGearAnimator: ValueAnimator? = null
@@ -389,6 +390,30 @@ open class PlayerActivity : Activity() {
         window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
     }
 
+    private fun startControlAnimations() {
+        if (controlAnimsRunning) return
+        controlAnimsRunning = true
+        ui.removeCallbacks(controlRgbTick)
+        if (controlRgbTargets.isNotEmpty()) ui.post(controlRgbTick)
+        playerGearMotion?.stop()
+        audioGearMotion?.stop()
+        playerGearMotion = playerSettingsGear?.let { GearMotion(it).also { motion -> motion.start() } }
+        audioGearMotion = audioSettingsGear?.let { GearMotion(it).also { motion -> motion.start() } }
+        startHeadphoneAnimations()
+        startTopIconGlow()
+    }
+
+    private fun stopControlAnimations() {
+        controlAnimsRunning = false
+        stopTopIconGlow()
+        stopHeadphoneAnimations()
+        playerGearMotion?.stop()
+        playerGearMotion = null
+        audioGearMotion?.stop()
+        audioGearMotion = null
+        ui.removeCallbacks(controlRgbTick)
+    }
+
     private fun showPausedControls() {
         hideBars()
         if (locked) {
@@ -398,6 +423,7 @@ open class PlayerActivity : Activity() {
             controls.visibility = View.VISIBLE
             lockBtn.visibility = View.VISIBLE
         }
+        startControlAnimations()
         ui.removeCallbacks(hideRun)
     }
 
@@ -414,6 +440,7 @@ open class PlayerActivity : Activity() {
             controls.visibility = View.VISIBLE
             lockBtn.visibility = View.VISIBLE
         }
+        startControlAnimations()
         ui.removeCallbacks(hideRun)
         ui.postDelayed(hideRun, 5000L)
     }
@@ -423,6 +450,7 @@ open class PlayerActivity : Activity() {
         topBar.visibility = View.GONE
         controls.visibility = View.GONE
         lockBtn.visibility = View.GONE
+        stopControlAnimations()
         ui.removeCallbacks(hideRun)
     }
 
@@ -1566,25 +1594,12 @@ open class PlayerActivity : Activity() {
         Engine.listener = lis
         lastPlayingState = null
         if (Engine.active && Engine.isPlaying()) PlaybackService.start(this) else PlaybackService.stop(this)
-        ui.removeCallbacks(controlRgbTick)
-        if (controlRgbTargets.isNotEmpty()) ui.post(controlRgbTick)
-        playerGearMotion?.stop()
-        audioGearMotion?.stop()
-        playerGearMotion = playerSettingsGear?.let { GearMotion(it).also { motion -> motion.start() } }
-        audioGearMotion = audioSettingsGear?.let { GearMotion(it).also { motion -> motion.start() } }
-        startHeadphoneAnimations()
-        startTopIconGlow()
+        if (controlsVisible()) startControlAnimations() else stopControlAnimations()
         hideBars()
     }
 
     override fun onPause() {
-        stopTopIconGlow()
-        stopHeadphoneAnimations()
-        playerGearMotion?.stop()
-        playerGearMotion = null
-        audioGearMotion?.stop()
-        audioGearMotion = null
-        ui.removeCallbacks(controlRgbTick)
+        stopControlAnimations()
         super.onPause()
         Engine.saveProgress()
         if (isFinishing) {
