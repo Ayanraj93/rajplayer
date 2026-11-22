@@ -780,7 +780,7 @@ val isDark = Prefs.themeMode(this) == "dark"
         menuBox.addView(titleView)
         lateinit var menuDlg: AlertDialog
         for (i in opts.indices) {
-            val row = TextView(this).apply {
+            val row = TextView(this@PlayerActivity).apply {
                 text = opts[i]
                 textSize = 15.5f
                 setTypeface(null, android.graphics.Typeface.BOLD)
@@ -793,11 +793,11 @@ val isDark = Prefs.themeMode(this) == "dark"
                     0 -> openSpeed()
                     1 -> decoderDialog()
                     2 -> {
-                        Tuning.setAutoFix(this, !Tuning.autoFix(this))
+                        Tuning.setAutoFix(this@PlayerActivity, !Tuning.autoFix(this@PlayerActivity))
                     }
-                    3 -> Dialogs.eq(this)
-                    4 -> Dialogs.boost(this)
-                    5 -> Dialogs.sleep(this)
+                    3 -> Dialogs.eq(this@PlayerActivity)
+                    4 -> Dialogs.boost(this@PlayerActivity)
+                    5 -> Dialogs.sleep(this@PlayerActivity)
                     6 -> openGrade()
                     7 -> audioSyncDialog()
                     8 -> showInfo()
@@ -807,30 +807,30 @@ val isDark = Prefs.themeMode(this) == "dark"
                     12 -> abStep()
                     13 -> {
                         Engine.bgAudio = !Engine.bgAudio
-                        Prefs.setBgAudio(this, Engine.bgAudio)
+                        Prefs.setBgAudio(this@PlayerActivity, Engine.bgAudio)
                         showMsg("Background audio " + onOff(Engine.bgAudio))
                     }
                     14 -> enterPip()
-                    15 -> Hooks.convert(this, listOf(Engine.cur()), listOf(Engine.title), null)
+                    15 -> Hooks.convert(this@PlayerActivity, listOf(Engine.cur()), listOf(Engine.title), null)
                     16 -> toggleMargin()
                     17 -> {
-                        Prefs.setAutoOrient(this, !Prefs.autoOrient(this))
-                        if (Prefs.autoOrient(this)) Orient.setFor(this, Engine.cur()) { videoPortrait = it }
+                        Prefs.setAutoOrient(this@PlayerActivity, !Prefs.autoOrient(this@PlayerActivity))
+                        if (Prefs.autoOrient(this@PlayerActivity)) Orient.setFor(this@PlayerActivity, Engine.cur()) { videoPortrait = it }
                         else requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
-                        showMsg("Auto-rotate " + onOff(Prefs.autoOrient(this)))
+                        showMsg("Auto-rotate " + onOff(Prefs.autoOrient(this@PlayerActivity)))
                     }
-                    18 -> Power.request(this)
+                    18 -> Power.request(this@PlayerActivity)
                     else -> {}
                 }
                 }
             }
             menuBox.addView(row)
         }
-        val sv = android.widget.ScrollView(this).apply {
+        val sv = android.widget.ScrollView(this@PlayerActivity).apply {
             setBackgroundColor(Color.TRANSPARENT)
             addView(menuBox)
         }
-        menuDlg = AlertDialog.Builder(this).setView(sv).create()
+        menuDlg = AlertDialog.Builder(this@PlayerActivity).setView(sv).create()
         menuDlg.show()
         menuDlg.window?.apply {
             setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
