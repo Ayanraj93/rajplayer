@@ -125,8 +125,14 @@ object Engine {
             .setEnableDecoderFallback(true)
             // Force Media3's Sonic time-stretch path instead of device-specific AudioTrack speed.
             .setEnableAudioOutputPlaybackParameters(false)
+        val mediaAudioAttrs = androidx.media3.common.AudioAttributes.Builder()
+            .setUsage(androidx.media3.common.C.USAGE_MEDIA)
+            .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
+            .build()
         val exo = ExoPlayer.Builder(app, renderers)
             .setLoadControl(loadControl)
+            .setAudioAttributes(mediaAudioAttrs, false)
+            .setWakeMode(androidx.media3.common.C.WAKE_MODE_LOCAL)
             .setHandleAudioBecomingNoisy(false)
             .build()
         exo.setPlaybackParameters(PlaybackParameters(1f, 1f))
@@ -321,6 +327,8 @@ object Engine {
                     .setContentType(AndroidAudioAttributes.CONTENT_TYPE_MUSIC).build()
                 focusReq = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
                     .setAudioAttributes(attrs)
+                    .setWillPauseWhenDucked(false)
+                    .setAcceptsDelayedFocusGain(true)
                     .setOnAudioFocusChangeListener { change -> main.post {
                         when (change) {
                             AudioManager.AUDIOFOCUS_GAIN -> if (resumeOnFocus) {
@@ -329,6 +337,9 @@ object Engine {
                                 mp?.play()
                                 holdLocks()
                                 notifyChanged()
+                            }
+                            AudioManager.AUDIOFOCUS_LOSS_TRANSIENT_CAN_DUCK -> {
+                                // Do not duck or stutter on SMS/notification chimes or fingerprint UI.
                             }
                             AudioManager.AUDIOFOCUS_LOSS_TRANSIENT -> if (isPlaying()) { resumeOnFocus = true; mp?.pause(); notifyChanged() }
                             AudioManager.AUDIOFOCUS_LOSS -> {

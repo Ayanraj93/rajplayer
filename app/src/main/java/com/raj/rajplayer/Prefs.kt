@@ -35,12 +35,18 @@ object Theme {
                 else -> Color.parseColor("#0B0F14")
             }
             Prefs.K_ACCENT -> accent
-            Prefs.K_TEXT, Prefs.K_ATEXT -> if (light) Color.parseColor("#111111") else Color.WHITE
+            Prefs.K_TEXT, Prefs.K_ATEXT -> when (mode) {
+                "dark", "light" -> Color.parseColor("#111111")
+                else -> Color.parseColor("#69F0AE")
+            }
             Prefs.K_VBAR -> Color.parseColor("#99000000")
-            Prefs.K_VTEXT -> Color.WHITE
+            Prefs.K_VTEXT -> if (mode == "dark") Color.parseColor("#111111") else Color.parseColor("#69F0AE")
             Prefs.K_ABAR -> (accent and 0x00FFFFFF) or 0x33000000
-            Prefs.K_ICON -> if (light) Color.parseColor("#111111") else Color.WHITE
-            else -> Color.WHITE
+            Prefs.K_ICON -> when (mode) {
+                "dark", "light" -> Color.parseColor("#111111")
+                else -> Color.parseColor("#69F0AE")
+            }
+            else -> if (mode == "dark") Color.parseColor("#111111") else Color.parseColor("#69F0AE")
         }
     }
 }
@@ -171,14 +177,14 @@ object Prefs {
     fun shuffle(c: Context): Boolean = p(c).getBoolean("shuffle", false)
     fun setShuffle(c: Context, v: Boolean) { p(c).edit().putBoolean("shuffle", v).apply() }
 
-    // video aur audio ke repeat/shuffle alag-alag
-    fun repeatFor(c: Context, video: Boolean): Int = if (video) p(c).getInt("v_repeat", 0) else repeat(c)
-    fun setRepeatFor(c: Context, video: Boolean, v: Int) {
-        if (video) p(c).edit().putInt("v_repeat", v).apply() else setRepeat(c, v)
+    // video aur audio ke repeat/shuffle ek dusre se linked (hamesha synced)
+    fun repeatFor(c: Context, @Suppress("UNUSED_PARAMETER") video: Boolean): Int = repeat(c)
+    fun setRepeatFor(c: Context, @Suppress("UNUSED_PARAMETER") video: Boolean, v: Int) {
+        setRepeat(c, v)
     }
-    fun shuffleFor(c: Context, video: Boolean): Boolean = if (video) p(c).getBoolean("v_shuffle", false) else shuffle(c)
-    fun setShuffleFor(c: Context, video: Boolean, v: Boolean) {
-        if (video) p(c).edit().putBoolean("v_shuffle", v).apply() else setShuffle(c, v)
+    fun shuffleFor(c: Context, @Suppress("UNUSED_PARAMETER") video: Boolean): Boolean = shuffle(c)
+    fun setShuffleFor(c: Context, @Suppress("UNUSED_PARAMETER") video: Boolean, v: Boolean) {
+        setShuffle(c, v)
     }
 
     fun favs(c: Context): Set<String> {
