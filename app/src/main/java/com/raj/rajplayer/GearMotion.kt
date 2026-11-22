@@ -64,6 +64,12 @@ class GearMotion(private val view: View) {
 
     private fun startRgb() {
         val density = view.resources.displayMetrics.density
+        val strokePx = (1f * density).toInt().coerceAtLeast(1)
+        val ringBg = if (view is ImageView) {
+            GradientDrawable().apply {
+                shape = GradientDrawable.OVAL
+            }.also { view.background = it }
+        } else null
         colorAnimator = ValueAnimator.ofArgb(
             Color.RED, Color.MAGENTA, Color.BLUE, Color.CYAN,
             Color.GREEN, Color.YELLOW, Color.RED
@@ -72,14 +78,12 @@ class GearMotion(private val view: View) {
             repeatCount = ValueAnimator.INFINITE
             interpolator = LinearInterpolator()
             addUpdateListener {
+                if (stopped) return@addUpdateListener
                 val c = it.animatedValue as Int
                 if (view is ImageView) {
                     view.setColorFilter(c)
-                    view.background = GradientDrawable().apply {
-                        shape = GradientDrawable.OVAL
-                        setColor(Color.argb(24, Color.red(c), Color.green(c), Color.blue(c)))
-                        setStroke((1f * density).toInt().coerceAtLeast(1), c)
-                    }
+                    ringBg?.setColor(Color.argb(24, Color.red(c), Color.green(c), Color.blue(c)))
+                    ringBg?.setStroke(strokePx, c)
                 } else if (view is TextView) {
                     view.setTextColor(c)
                     view.setShadowLayer(7f * density, 0f, 0f, c)
