@@ -819,20 +819,13 @@ open class PlayerActivity : Activity() {
                     18 -> Power.request(this@PlayerActivity)
                     else -> {}
                 }
-                }
             }
-            .create()
-        dlg.show()
-        dlg.window?.apply {
-            setDimAmount(0.22f)
-            decorView.background?.mutate()?.alpha = 185
-        }
+            .show()
         val titleId = resources.getIdentifier("alertTitle", "id", "android")
         if (titleId != 0) {
             dlg.findViewById<TextView>(titleId)?.setTextColor(pink)
         }
         dlg.listView?.apply {
-            setBackgroundColor(Color.parseColor("#B3141414"))
             setOnHierarchyChangeListener(object : android.view.ViewGroup.OnHierarchyChangeListener {
                 override fun onChildViewAdded(parent: android.view.View?, child: android.view.View?) {
                     if (child is TextView) child.setTextColor(pink)
@@ -841,8 +834,8 @@ open class PlayerActivity : Activity() {
             })
             post {
                 for (idx in 0 until childCount) {
-                    val item = getChildAt(idx)
-                    if (item is TextView) item.setTextColor(pink)
+                    val row = getChildAt(idx)
+                    if (row is TextView) row.setTextColor(pink)
                 }
             }
         }
