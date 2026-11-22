@@ -497,6 +497,25 @@ open class PlayerActivity : Activity() {
     }
 
     // ================= video surface (SurfaceView / TextureView for grading) =================
+    override fun onRestart() {
+        super.onRestart()
+        if (!audioMode && Engine.active) {
+            try { mp.recreateSurface() } catch (_: Exception) { }
+            attachVideo()
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (!audioMode && Engine.active) {
+            layout.post {
+                try {
+                    if (layout.childCount == 0) attachVideo()
+                } catch (_: Exception) { }
+            }
+        }
+    }
+
     private fun attachVideo() {
         try {
             mp.detachViews()
@@ -763,33 +782,11 @@ open class PlayerActivity : Activity() {
             "Auto-rotate to match video: " + onOff(Prefs.autoOrient(this)),
             "Allow Background (Battery)"
         )
-val isDark = Prefs.themeMode(this) == "dark"
-        val txtCol = if (isDark) Color.parseColor("#111111") else Color.parseColor("#69F0AE")
-        val menuBox = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setPadding(dp(18), dp(14), dp(18), dp(14))
-            setBackgroundColor(Color.TRANSPARENT)
-        }
-        val titleView = TextView(this).apply {
-            text = "Options"
-            textSize = 19f
-            setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(txtCol)
-            setPadding(dp(4), dp(4), dp(4), dp(12))
-        }
-        menuBox.addView(titleView)
-        lateinit var menuDlg: AlertDialog
-        for (i in opts.indices) {
-            val row = TextView(this@PlayerActivity).apply {
-                text = opts[i]
-                textSize = 15.5f
-                setTypeface(null, android.graphics.Typeface.BOLD)
-                setTextColor(txtCol)
-                setPadding(dp(6), dp(12), dp(6), dp(12))
-                setBackgroundColor(Color.TRANSPARENT)
-                setOnClickListener {
-                    menuDlg.dismiss()
-                    when (i) {
+        val pink = Color.parseColor("#FF4081")
+        val dlg = AlertDialog.Builder(this)
+            .setTitle("Options")
+            .setItems(opts) { _, i ->
+                when (i) {
                     0 -> openSpeed()
                     1 -> decoderDialog()
                     2 -> {
@@ -824,17 +821,30 @@ val isDark = Prefs.themeMode(this) == "dark"
                 }
                 }
             }
-            menuBox.addView(row)
+            .create()
+        dlg.show()
+        dlg.window?.apply {
+            setDimAmount(0.22f)
+            decorView.background?.mutate()?.alpha = 185
         }
-        val sv = android.widget.ScrollView(this@PlayerActivity).apply {
-            setBackgroundColor(Color.TRANSPARENT)
-            addView(menuBox)
+        val titleId = resources.getIdentifier("alertTitle", "id", "android")
+        if (titleId != 0) {
+            dlg.findViewById<TextView>(titleId)?.setTextColor(pink)
         }
-        menuDlg = AlertDialog.Builder(this@PlayerActivity).setView(sv).create()
-        menuDlg.show()
-        menuDlg.window?.apply {
-            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
-            setDimAmount(0f)
+        dlg.listView?.apply {
+            setBackgroundColor(Color.parseColor("#B3141414"))
+            setOnHierarchyChangeListener(object : android.view.ViewGroup.OnHierarchyChangeListener {
+                override fun onChildViewAdded(parent: android.view.View?, child: android.view.View?) {
+                    if (child is TextView) child.setTextColor(pink)
+                }
+                override fun onChildViewRemoved(parent: android.view.View?, child: android.view.View?) {}
+            })
+            post {
+                for (idx in 0 until childCount) {
+                    val item = getChildAt(idx)
+                    if (item is TextView) item.setTextColor(pink)
+                }
+            }
         }
     }
 
