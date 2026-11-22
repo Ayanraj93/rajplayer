@@ -377,18 +377,6 @@ open class PlayerActivity : Activity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         resetZoom()
-        resumeBarRef?.let { bar ->
-            hideResumeBannerRef?.let { ui.removeCallbacks(it) }
-            val savedPos = Prefs.pos(this, cu.toString())
-            if (savedPos > 5000L) {
-                bar.alpha = 1f
-                bar.visibility = View.VISIBLE
-                bar.bringToFront()
-                hideResumeBannerRef?.let { ui.postDelayed(it, 8000L) }
-            } else {
-                bar.visibility = View.GONE
-            }
-        }
         hideBars()
     }
 
@@ -516,17 +504,6 @@ open class PlayerActivity : Activity() {
         if (!audioMode && Engine.active) {
             try { mp.recreateSurface() } catch (_: Exception) { }
             attachVideo()
-        }
-    }
-
-    override fun onResume() {
-        super.onResume()
-        if (!audioMode && Engine.active) {
-            layout.post {
-                try {
-                    if (layout.childCount == 0) attachVideo()
-                } catch (_: Exception) { }
-            }
         }
     }
 
@@ -747,6 +724,18 @@ open class PlayerActivity : Activity() {
         Prefs.setLastPlayedUri(this, cu.toString())
         if (Prefs.autoOrient(this)) Orient.setFor(this, cu) { videoPortrait = it }
         resetZoom()
+        resumeBarRef?.let { bar ->
+            hideResumeBannerRef?.let { ui.removeCallbacks(it) }
+            val savedPos = Prefs.pos(this, cu.toString())
+            if (savedPos > 5000L) {
+                bar.alpha = 1f
+                bar.visibility = View.VISIBLE
+                bar.bringToFront()
+                hideResumeBannerRef?.let { ui.postDelayed(it, 8000L) }
+            } else {
+                bar.visibility = View.GONE
+            }
+        }
         VideoInfo.probeAsync(this, cu) { runOnUiThread { applyHdrWindow() } }
         applyHdrWindow()
         ui.removeCallbacks(rateRun)
