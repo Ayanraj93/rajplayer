@@ -76,6 +76,8 @@ open class PlayerActivity : Activity() {
     private var systemBarsVisible = false
     private var controlAnimsRunning = false
     private var keepControlsHiddenOnPause = false
+    private var resumeBarRef: LinearLayout? = null
+    private var hideResumeBannerRef: Runnable? = null
     private var lastPlayingState: Boolean? = null
     private var audioSettingsAnimator: ValueAnimator? = null
     private var playerGearAnimator: ValueAnimator? = null
@@ -375,6 +377,18 @@ open class PlayerActivity : Activity() {
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
         resetZoom()
+        resumeBarRef?.let { bar ->
+            hideResumeBannerRef?.let { ui.removeCallbacks(it) }
+            val savedPos = Prefs.pos(this, cu.toString())
+            if (savedPos > 5000L) {
+                bar.alpha = 1f
+                bar.visibility = View.VISIBLE
+                bar.bringToFront()
+                hideResumeBannerRef?.let { ui.postDelayed(it, 8000L) }
+            } else {
+                bar.visibility = View.GONE
+            }
+        }
         hideBars()
     }
 
@@ -1604,6 +1618,71 @@ open class PlayerActivity : Activity() {
 
         audioModePanel.visibility = View.GONE
         root.addView(audioModePanel, FrameLayout.LayoutParams(MP, MP))
+
+        val resumeBar = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(14), dp(10), dp(14), dp(10))
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(0xE6181818.toInt())
+                cornerRadius = dp(24).toFloat()
+            }
+            elevation = dp(6).toFloat()
+            visibility = View.GONE
+            isClickable = true
+            isFocusable = true
+        }
+        val resumeCloseBtn = TextView(this).apply {
+            text = "\u2715"
+            textSize = 16f
+            setTextColor(0xFFE0E0E0.toInt())
+            setPadding(dp(4), dp(2), dp(10), dp(2))
+        }
+        val resumeMsgTv = TextView(this).apply {
+            text = "Continue from where you stopped."
+            textSize = 13.5f
+            setTextColor(0xFFF5F5F5.toInt())
+        }
+        val startOverBtn = TextView(this).apply {
+            text = "START OVER"
+            textSize = 13f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(0xFFFF4081.toInt())
+            setPadding(dp(12), dp(4), dp(4), dp(4))
+        }
+        resumeBar.addView(resumeCloseBtn, LinearLayout.LayoutParams(WC, WC))
+        resumeBar.addView(resumeMsgTv, LinearLayout.LayoutParams(0, WC, 1f))
+        resumeBar.addView(startOverBtn, LinearLayout.LayoutParams(WC, WC))
+
+        val hideResumeBanner = Runnable {
+            resumeBar.animate().alpha(0f).setDuration(180L).withEndAction {
+                resumeBar.visibility = View.GONE
+                resumeBar.alpha = 1f
+            }.start()
+        }
+        resumeCloseBtn.setOnClickListener {
+            ui.removeCallbacks(hideResumeBanner)
+            resumeBar.visibility = View.GONE
+        }
+        startOverBtn.setOnClickListener {
+            ui.removeCallbacks(hideResumeBanner)
+            resumeBar.visibility = View.GONE
+            val curUriStr = if (Engine.items.isNotEmpty()) Engine.cur().toString() else ""
+            if (curUriStr.isNotEmpty()) {
+                Prefs.setPos(this@PlayerActivity, curUriStr, 0L)
+            }
+            Engine.seekTo(0L)
+            showMsg("Started from beginning")
+        }
+
+        val resumeLp = FrameLayout.LayoutParams(MP, WC, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+            leftMargin = dp(14)
+            rightMargin = dp(14)
+            bottomMargin = dp(76)
+        }
+        root.addView(resumeBar, resumeLp)
+        resumeBarRef = resumeBar
+        hideResumeBannerRef = hideResumeBanner
 
         setContentView(root)
         padForCutout()
