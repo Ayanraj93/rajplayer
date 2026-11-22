@@ -96,7 +96,7 @@ object Engine {
         registerAudioDeviceCallback()
         mp?.let { return it }
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(15000, 30000, 250, 500)
+            .setBufferDurationsMs(20000, 40000, 100, 200)
             .setTargetBufferBytes(64 * 1024 * 1024)
             .setBackBuffer(5000, true)
             .setPrioritizeTimeOverSizeThresholds(true)

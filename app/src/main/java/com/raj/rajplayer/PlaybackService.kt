@@ -147,12 +147,13 @@ class PlaybackService : Service() {
 
     private fun openPi(): PendingIntent {
         val isVideo = Engine.isVideo
-        val cls: Class<*> = if (isVideo)
-            Orient.videoClass(this, Engine.items.getOrNull(Engine.idx))
-        else AudioActivity::class.java
-        val i = Intent(this, cls)
+        if (isVideo) {
+            try { Prefs.setAudioModeSession(this, true) } catch (_: Exception) { }
+        }
+        val i = Intent(this, AudioActivity::class.java)
         i.data = Engine.items.getOrNull(Engine.idx)
         i.putExtra("cont", true)
+        i.putExtra("fromVideo", isVideo)
         i.putExtra("returnToVideo", isVideo)
         i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         return PendingIntent.getActivity(this, 1, i, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
