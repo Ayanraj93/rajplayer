@@ -75,6 +75,7 @@ open class PlayerActivity : Activity() {
     private var audioChildOpen = false
     private var systemBarsVisible = false
     private var controlAnimsRunning = false
+    private var keepControlsHiddenOnPause = false
     private var lastPlayingState: Boolean? = null
     private var audioSettingsAnimator: ValueAnimator? = null
     private var playerGearAnimator: ValueAnimator? = null
@@ -455,7 +456,14 @@ open class PlayerActivity : Activity() {
     }
 
     private fun applyPlaybackUi(playing: Boolean) {
-        if (playing) hideControls() else showPausedControls()
+        if (playing) {
+            keepControlsHiddenOnPause = false
+            hideControls()
+        } else if (keepControlsHiddenOnPause) {
+            hideControls()
+        } else {
+            showPausedControls()
+        }
     }
 
     private fun controlsVisible() = lockBtn.visibility == View.VISIBLE
@@ -629,12 +637,19 @@ open class PlayerActivity : Activity() {
         showMsg(if (ms > 0) "+" + (ms / 1000) + "s" else "" + (ms / 1000) + "s")
     }
 
-    private fun togglePlay() {
+    private fun togglePlay(fromDoubleTap: Boolean = false) {
+        val wasHidden = !controlsVisible()
+        keepControlsHiddenOnPause = fromDoubleTap && wasHidden
         Engine.toggle(this)
         ui.post {
             val playing = Engine.isPlaying()
             lastPlayingState = playing
-            applyPlaybackUi(playing)
+            if (fromDoubleTap && wasHidden) {
+                showMsg(if (playing) "Playing" else "Paused")
+                hideControls()
+            } else {
+                applyPlaybackUi(playing)
+            }
         }
     }
 
@@ -748,10 +763,33 @@ open class PlayerActivity : Activity() {
             "Auto-rotate to match video: " + onOff(Prefs.autoOrient(this)),
             "Allow Background (Battery)"
         )
-        AlertDialog.Builder(this)
-            .setTitle("Options")
-            .setItems(opts) { _, i ->
-                when (i) {
+val isDark = Prefs.themeMode(this) == "dark"
+        val txtCol = if (isDark) Color.parseColor("#111111") else Color.parseColor("#69F0AE")
+        val menuBox = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(14), dp(18), dp(14))
+            setBackgroundColor(Color.TRANSPARENT)
+        }
+        val titleView = TextView(this).apply {
+            text = "Options"
+            textSize = 19f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setTextColor(txtCol)
+            setPadding(dp(4), dp(4), dp(4), dp(12))
+        }
+        menuBox.addView(titleView)
+        lateinit var menuDlg: AlertDialog
+        for (i in opts.indices) {
+            val row = TextView(this).apply {
+                text = opts[i]
+                textSize = 15.5f
+                setTypeface(null, android.graphics.Typeface.BOLD)
+                setTextColor(txtCol)
+                setPadding(dp(6), dp(12), dp(6), dp(12))
+                setBackgroundColor(Color.TRANSPARENT)
+                setOnClickListener {
+                    menuDlg.dismiss()
+                    when (i) {
                     0 -> openSpeed()
                     1 -> decoderDialog()
                     2 -> {
@@ -784,8 +822,20 @@ open class PlayerActivity : Activity() {
                     18 -> Power.request(this)
                     else -> {}
                 }
+                }
             }
-            .show()
+            menuBox.addView(row)
+        }
+        val sv = android.widget.ScrollView(this).apply {
+            setBackgroundColor(Color.TRANSPARENT)
+            addView(menuBox)
+        }
+        menuDlg = AlertDialog.Builder(this).setView(sv).create()
+        menuDlg.show()
+        menuDlg.window?.apply {
+            setBackgroundDrawable(android.graphics.drawable.ColorDrawable(Color.TRANSPARENT))
+            setDimAmount(0f)
+        }
     }
 
     private fun toggleMargin() {
@@ -1011,6 +1061,7 @@ open class PlayerActivity : Activity() {
                 if (controlsVisible()) {
                     hideControls()
                 } else {
+                    keepControlsHiddenOnPause = false
                     showControls()
                 }
                 return true
@@ -1030,7 +1081,7 @@ open class PlayerActivity : Activity() {
                 } else if (e.x > w * 2f / 3f) {
                     seekBy(sMs)
                 } else {
-                    togglePlay()
+                    togglePlay(fromDoubleTap = true)
                 }
                 return true
             }
