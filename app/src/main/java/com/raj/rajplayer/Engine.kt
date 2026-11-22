@@ -96,7 +96,7 @@ object Engine {
         registerAudioDeviceCallback()
         mp?.let { return it }
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(4000, 20000, 250, 500)
+            .setBufferDurationsMs(6000, 25000, 250, 500)
             .setBackBuffer(5000, true)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
@@ -131,6 +131,7 @@ object Engine {
         exo.setPlaybackParameters(PlaybackParameters(1f, 1f))
         exo.setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
         exo.setVideoScalingMode(androidx.media3.common.C.VIDEO_SCALING_MODE_SCALE_TO_FIT)
+        exo.setVideoChangeFrameRateStrategy(androidx.media3.common.C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF)
         exo.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 when (state) {

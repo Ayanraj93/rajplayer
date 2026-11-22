@@ -923,6 +923,13 @@ open class PlayerActivity : Activity() {
     }
 
 
+    private fun stopVideoImmediatelyIfNeeded() {
+        if (!Prefs.videoBgPlay(this) && !audioMode && !audioChildOpen) {
+            if (Engine.isPlaying()) Engine.pause()
+            PlaybackService.stop(this)
+        }
+    }
+
     override fun onBackPressed() {
         if (audioMode) {
             returnToVideo()
@@ -932,6 +939,7 @@ open class PlayerActivity : Activity() {
             showMsg("Screen is locked. Long-press the lock icon to unlock.")
             return
         }
+        stopVideoImmediatelyIfNeeded()
         super.onBackPressed()
     }
 
@@ -1180,7 +1188,10 @@ open class PlayerActivity : Activity() {
         topBar.gravity = Gravity.CENTER_VERTICAL
         topBar.setBackgroundColor(Color.TRANSPARENT)
         topBar.setPadding(dp(20), dp(8), dp(20), dp(8))
-        topBar.addView(ib("\u2190", 22f) { finish() })
+        topBar.addView(ib("\u2190", 22f) {
+            stopVideoImmediatelyIfNeeded()
+            finish()
+        })
         titleTv = TextView(this)
         titleTv.setTextColor(txtCol)
         titleTv.textSize = 15f
@@ -1546,7 +1557,11 @@ open class PlayerActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (!Prefs.audioModeSession(this)) Bg.restoreVideo()
+        if (!audioMode) {
+            Prefs.setAudioModeSession(this, false)
+            AudioActivity.audioModeSession = false
+            Bg.restoreVideo()
+        }
         audioChildOpen = false
         Engine.listener = lis
         lastPlayingState = null
@@ -1572,9 +1587,13 @@ open class PlayerActivity : Activity() {
         ui.removeCallbacks(controlRgbTick)
         super.onPause()
         Engine.saveProgress()
-        val allowVideoBg = Prefs.videoBgPlay(this)
-        if ((allowVideoBg || audioMode || audioChildOpen) && Engine.isPlaying()) {
-            PlaybackService.start(this)
+        if (isFinishing) {
+            stopVideoImmediatelyIfNeeded()
+        } else {
+            val allowVideoBg = Prefs.videoBgPlay(this)
+            if ((allowVideoBg || audioMode || audioChildOpen) && Engine.isPlaying()) {
+                PlaybackService.start(this)
+            }
         }
     }
 

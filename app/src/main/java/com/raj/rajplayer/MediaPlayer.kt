@@ -80,8 +80,10 @@ class MediaPlayer(val player: ExoPlayer) {
     }
 
     fun setRate(rate: Float) {
-        val safe = rate.coerceIn(0.25f, 5f)
-        player.setPlaybackParameters(PlaybackParameters(safe, 1f))
+        val safe = (Math.round(rate.coerceIn(0.25f, 5f) * 100f) / 100f)
+        if (Math.abs(player.playbackParameters.speed - safe) >= 0.005f) {
+            player.setPlaybackParameters(PlaybackParameters(safe, 1f))
+        }
     }
 
     fun setAudioDelay(@Suppress("UNUSED_PARAMETER") delayUs: Long) {

@@ -29,13 +29,12 @@ object Bg {
         }
     }
 
-    // App me wapas aane par video chalu
+    // App me wapas aane par video chalu (unconditional so video track never stays stuck disabled)
     fun restoreVideo() {
         val p = Engine.mp ?: return
-        if (savedTrack < 0 || Engine.items.isEmpty()) return
         try {
-            if (Engine.cur().toString() == savedKey) p.setVideoTrack(savedTrack)
-        } catch (e: Exception) {
+            p.setVideoTrack(0)
+        } catch (_: Exception) {
         }
         savedTrack = -2
         savedKey = ""
