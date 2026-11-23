@@ -458,9 +458,12 @@ class AudioActivity : Activity() {
         ex.gravity = Gravity.CENTER
         ex.setPadding(0, dp(12), 0, 0)
         speedBtn = ib("1x", 14f, ic) { b ->
-            speedIdx = (speedIdx + 1) % speeds.size
-            Engine.mp?.setRate(speeds[speedIdx])
-            b.text = speeds[speedIdx].toString() + "x"
+            val cur = Engine.mp?.getRate() ?: speeds[speedIdx]
+            val nextIdx = speeds.indexOfFirst { it > cur + 0.02f }
+            speedIdx = if (nextIdx >= 0) nextIdx else 0
+            val next = speeds[speedIdx]
+            Engine.mp?.setRate(next)
+            b.text = rateLabel(next)
         }
         ex.addView(speedBtn)
         ex.addView(ib("EQ", 14f, ic) { Dialogs.eq(this) })
@@ -513,6 +516,16 @@ class AudioActivity : Activity() {
         repBtn.alpha = if (r == 0) 0.35f else 1f
     }
 
+    private fun rateLabel(r: Float): String =
+        String.format(java.util.Locale.US, "%.2f", r).trimEnd('0').trimEnd('.') + "x"
+
+    private fun syncSpeedUi() {
+        val cur = Engine.mp?.getRate() ?: speeds[speedIdx]
+        val exact = speeds.indexOfFirst { kotlin.math.abs(it - cur) < 0.02f }
+        if (exact >= 0) speedIdx = exact
+        if (::speedBtn.isInitialized) speedBtn.text = rateLabel(cur)
+    }
+
     private fun onItem() {
         if (!Engine.active || Engine.items.isEmpty()) {
             finish()
@@ -520,9 +533,7 @@ class AudioActivity : Activity() {
         }
         Prefs.setLastPlayedUri(this, Engine.cur().toString())
         titleTv.text = Engine.title
-        speedIdx = 0
-        Engine.mp?.setRate(1f)
-        if (::speedBtn.isInitialized) speedBtn.text = "1x"
+        syncSpeedUi()
         subTv.text = (Engine.idx + 1).toString() + " / " + Engine.items.size
         loadArt()
         update()
@@ -711,6 +722,7 @@ class AudioActivity : Activity() {
         visible = true
         switchingToVideo = false
         Engine.modeSwitching = false
+        syncSpeedUi()
         if (Engine.active && Engine.isPlaying()) PlaybackService.start(this)
         settingsGearMotion?.stop()
         settingsGearMotion = GearMotion(gearButton).also { it.start() }

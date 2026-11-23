@@ -641,6 +641,13 @@ open class PlayerActivity : Activity() {
         speedBtn.text = rateLabel(rate)
     }
 
+    private fun syncSpeedFromEngine() {
+        val cur = Engine.mp?.getRate() ?: return
+        rate = Math.round(cur.coerceIn(0.25f, 5f) * 20f) / 20f
+        atomic?.setPaused(rate > 2f)
+        if (::speedBtn.isInitialized) speedBtn.text = rateLabel(rate)
+    }
+
     private fun setRateTo(r: Float) {
         rate = Math.round(r.coerceIn(0.25f, 5f) * 20f) / 20f
         applyRate()
@@ -1788,6 +1795,7 @@ open class PlayerActivity : Activity() {
                 touchView.visibility = View.VISIBLE
                 atomic?.visibility = View.VISIBLE
                 attachVideo()
+                syncSpeedFromEngine()
                 showControls()
             }
         }
@@ -1805,6 +1813,7 @@ open class PlayerActivity : Activity() {
         }
         audioChildOpen = false
         Engine.listener = lis
+        syncSpeedFromEngine()
         lastPlayingState = null
         if (Engine.active && Engine.isPlaying()) PlaybackService.start(this) else PlaybackService.stop(this)
         if (controlsVisible()) startControlAnimations() else stopControlAnimations()

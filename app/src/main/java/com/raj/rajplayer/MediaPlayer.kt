@@ -82,6 +82,8 @@ class MediaPlayer(val player: ExoPlayer) {
         player.seekTo(ms.coerceAtLeast(0L))
     }
 
+    fun getRate(): Float = player.playbackParameters.speed.coerceIn(0.25f, 5f)
+
     fun setRate(rate: Float) {
         val safe = (Math.round(rate.coerceIn(0.25f, 5f) * 100f) / 100f)
         if (Math.abs(player.playbackParameters.speed - safe) >= 0.005f) {
