@@ -67,6 +67,7 @@ class AudioActivity : Activity() {
     private val ui = Handler(Looper.getMainLooper())
     private val pool = Executors.newSingleThreadExecutor()
     private var userSeeking = false
+    private var switchingToVideo = false
     private var audioSystemBarsHidden = false
     private var artKey = ""
     private val speeds = floatArrayOf(1f, 1.5f, 2f, 2.5f, 3f, 4f, 5f)
@@ -192,15 +193,28 @@ class AudioActivity : Activity() {
     }
 
     private fun backToVideoPlayer() {
+        if (switchingToVideo) return
         val uri = Engine.items.getOrNull(Engine.idx) ?: return
+        switchingToVideo = true
         Prefs.setAudioModeSession(this, false)
         audioModeSession = false
+        Bg.restoreVideo()
         val i = Intent(this, Orient.videoClass(this, uri))
         i.data = uri
         i.putExtra("cont", true)
-        i.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        i.putExtra("returnToVideo", true)
+        i.addFlags(
+            Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+            Intent.FLAG_ACTIVITY_SINGLE_TOP or
+            Intent.FLAG_ACTIVITY_NO_ANIMATION or
+            Intent.FLAG_GRANT_READ_URI_PERMISSION
+        )
         startActivity(i)
+        @Suppress("DEPRECATION")
+        overridePendingTransition(0, 0)
         finish()
+        @Suppress("DEPRECATION")
+        overridePendingTransition(0, 0)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -679,6 +693,7 @@ class AudioActivity : Activity() {
     override fun onResume() {
         super.onResume()
         visible = true
+        switchingToVideo = false
         if (Engine.active && Engine.isPlaying()) PlaybackService.start(this)
         settingsGearMotion?.stop()
         settingsGearMotion = GearMotion(gearButton).also { it.start() }

@@ -119,7 +119,15 @@ class MediaPlayer(val player: ExoPlayer) {
         @Suppress("UNUSED_PARAMETER") useTexture: Boolean,
         grading: Boolean
     ) {
-        detachViews()
+        val prevHost = host
+        val prevListener = layoutChangeListener
+        try {
+            if (prevListener != null) prevHost?.removeOnLayoutChangeListener(prevListener)
+            if (prevHost != null && prevHost !== container) prevHost.removeAllViews()
+        } catch (_: Exception) { }
+        layoutChangeListener = null
+        surface = null
+        texture = null
 
         host = container
         container.removeAllViews()

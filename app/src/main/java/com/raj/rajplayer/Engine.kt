@@ -96,9 +96,9 @@ object Engine {
         registerAudioDeviceCallback()
         mp?.let { return it }
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(20000, 40000, 100, 200)
-            .setTargetBufferBytes(64 * 1024 * 1024)
-            .setBackBuffer(5000, true)
+            .setBufferDurationsMs(30000, 60000, 1000, 2500)
+            .setTargetBufferBytes(96 * 1024 * 1024)
+            .setBackBuffer(10000, true)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
         val av1AwareSelector = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
@@ -135,6 +135,7 @@ object Engine {
             .setWakeMode(androidx.media3.common.C.WAKE_MODE_LOCAL)
             .setHandleAudioBecomingNoisy(false)
             .build()
+        exo.setPriority(androidx.media3.common.C.PRIORITY_PLAYBACK)
         exo.setPlaybackParameters(PlaybackParameters(1f, 1f))
         exo.setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
         exo.setVideoScalingMode(androidx.media3.common.C.VIDEO_SCALING_MODE_SCALE_TO_FIT)

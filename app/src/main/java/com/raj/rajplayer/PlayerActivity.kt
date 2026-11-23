@@ -519,7 +519,7 @@ open class PlayerActivity : Activity() {
     override fun onRestart() {
         super.onRestart()
         if (!audioMode && Engine.active) {
-            try { mp.recreateSurface() } catch (_: Exception) { }
+            Bg.restoreVideo()
             attachVideo()
         }
     }
@@ -543,7 +543,10 @@ open class PlayerActivity : Activity() {
             val i = Intent(this, AudioActivity::class.java)
                 .putExtra("cont", true)
                 .putExtra("fromVideo", true)
+                .addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
             startActivity(i)
+            @Suppress("DEPRECATION")
+            overridePendingTransition(0, 0)
         } catch (e: Exception) {
             audioChildOpen = false
             Toast.makeText(this, "Audio Player open nahi hua: ${e.message}", Toast.LENGTH_LONG).show()
@@ -803,7 +806,6 @@ open class PlayerActivity : Activity() {
             "Auto-rotate to match video: " + onOff(Prefs.autoOrient(this)),
             "Allow Background (Battery)"
         )
-        val pink = Color.parseColor("#FF4081")
         val dlg = AlertDialog.Builder(this)
             .setTitle("Options")
             .setItems(opts) { _, i ->
@@ -842,23 +844,74 @@ open class PlayerActivity : Activity() {
                 }
             }
             .show()
+        val cardBg = android.graphics.drawable.GradientDrawable(
+            android.graphics.drawable.GradientDrawable.Orientation.TOP_BOTTOM,
+            intArrayOf(0xF50D131F.toInt(), 0xF7141D2E.toInt())
+        ).apply {
+            cornerRadius = dp(24).toFloat()
+            setStroke(dp(2), 0x8800E5FF.toInt())
+        }
+        dlg.window?.apply {
+            setBackgroundDrawable(cardBg)
+            setDimAmount(0.65f)
+        }
         val titleId = resources.getIdentifier("alertTitle", "id", "android")
         if (titleId != 0) {
-            dlg.findViewById<TextView>(titleId)?.setTextColor(pink)
+            dlg.findViewById<TextView>(titleId)?.apply {
+                setTextColor(0xFF00F5D4.toInt())
+                textSize = 20f
+                setTypeface(typeface, android.graphics.Typeface.BOLD)
+            }
+        }
+        val titleDividerId = resources.getIdentifier("titleDividerNoCustom", "id", "android")
+        if (titleDividerId != 0) {
+            dlg.findViewById<View>(titleDividerId)?.setBackgroundColor(0x2600E5FF)
         }
         dlg.listView?.apply {
+            divider = android.graphics.drawable.ColorDrawable(0x18FFFFFF)
+            dividerHeight = dp(1)
+            setPadding(dp(6), dp(4), dp(6), dp(12))
+            clipToPadding = false
             setOnHierarchyChangeListener(object : android.view.ViewGroup.OnHierarchyChangeListener {
                 override fun onChildViewAdded(parent: android.view.View?, child: android.view.View?) {
-                    if (child is TextView) child.setTextColor(pink)
+                    (child as? TextView)?.apply {
+                        textSize = 15.5f
+                        setPadding(dp(20), dp(13), dp(20), dp(13))
+                        val raw = text?.toString() ?: ""
+                        val splitIdx = when {
+                            raw.contains(": ") -> raw.indexOf(": ") + 2
+                            raw.contains("  ") -> raw.indexOf("  ") + 2
+                            else -> -1
+                        }
+                        if (splitIdx in 1 until raw.length) {
+                            val sp = android.text.SpannableString(raw)
+                            sp.setSpan(
+                                android.text.style.ForegroundColorSpan(0xFFF1F5F9.toInt()),
+                                0,
+                                splitIdx,
+                                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                            )
+                            val valColor = if (raw.endsWith("OFF")) 0xFFFF6B9D.toInt() else 0xFF00F5D4.toInt()
+                            sp.setSpan(
+                                android.text.style.ForegroundColorSpan(valColor),
+                                splitIdx,
+                                raw.length,
+                                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                            )
+                            sp.setSpan(
+                                android.text.style.StyleSpan(android.graphics.Typeface.BOLD),
+                                splitIdx,
+                                raw.length,
+                                android.text.Spanned.SPAN_EXCLUSIVE_EXCLUSIVE
+                            )
+                            text = sp
+                        } else {
+                            setTextColor(0xFFF1F5F9.toInt())
+                        }
+                    }
                 }
                 override fun onChildViewRemoved(parent: android.view.View?, child: android.view.View?) {}
             })
-            post {
-                for (idx in 0 until childCount) {
-                    val row = getChildAt(idx)
-                    if (row is TextView) row.setTextColor(pink)
-                }
-            }
         }
     }
 
