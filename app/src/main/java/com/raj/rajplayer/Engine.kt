@@ -106,10 +106,10 @@ object Engine {
             (Runtime.getRuntime().maxMemory() <= 256L * 1024L * 1024L)
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(
-                if (lowMem) 15000 else 25000,
-                if (lowMem) 30000 else 50000,
-                250,
-                if (lowMem) 750 else 1000
+                if (lowMem) 20000 else 30000,
+                if (lowMem) 40000 else 60000,
+                500,
+                1500
             )
             .setTargetBufferBytes(if (lowMem) 20 * 1024 * 1024 else 48 * 1024 * 1024)
             .setBackBuffer(if (lowMem) 3000 else 5000, false)
@@ -139,7 +139,24 @@ object Engine {
                 codecs
             }
         }
-        val renderers = DefaultRenderersFactory(app)
+        val renderers = object : DefaultRenderersFactory(app) {
+            override fun buildAudioSink(
+                context: Context,
+                enableFloatOutput: Boolean,
+                enableAudioOutputPlaybackParams: Boolean
+            ): androidx.media3.exoplayer.audio.AudioSink {
+                val bufferProvider = androidx.media3.exoplayer.audio.DefaultAudioTrackBufferSizeProvider.Builder()
+                    .setMinPcmBufferDurationUs(600_000)
+                    .setMaxPcmBufferDurationUs(1_200_000)
+                    .setPcmBufferMultiplicationFactor(8)
+                    .build()
+                return androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
+                    .setEnableFloatOutput(enableFloatOutput)
+                    .setEnableAudioOutputPlaybackParameters(enableAudioOutputPlaybackParams)
+                    .setAudioTrackBufferSizeProvider(bufferProvider)
+                    .build()
+            }
+        }
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setMediaCodecSelector(av1AwareSelector)
             .forceEnableMediaCodecAsynchronousQueueing()
@@ -160,7 +177,7 @@ object Engine {
         exo.setPlaybackParameters(PlaybackParameters(1f, 1f))
         exo.setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
         exo.setVideoScalingMode(androidx.media3.common.C.VIDEO_SCALING_MODE_SCALE_TO_FIT)
-        exo.setVideoChangeFrameRateStrategy(androidx.media3.common.C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_ONLY_IF_SEAMLESS)
+        exo.setVideoChangeFrameRateStrategy(androidx.media3.common.C.VIDEO_CHANGE_FRAME_RATE_STRATEGY_OFF)
         exo.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 when (state) {

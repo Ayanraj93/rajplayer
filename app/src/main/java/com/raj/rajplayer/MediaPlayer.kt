@@ -40,6 +40,7 @@ class MediaPlayer(val player: ExoPlayer) {
     private var surfaceCallback: android.view.SurfaceHolder.Callback? = null
     private var boundSurface: android.view.Surface? = null
     @Volatile private var surfacePaused: Boolean = false
+    @Volatile private var hasAttachedOutput: Boolean = false
 
     init {
         player.addListener(object : androidx.media3.common.Player.Listener {
@@ -124,20 +125,24 @@ class MediaPlayer(val player: ExoPlayer) {
         if (!surfacePaused && s != null && s.isValid) {
             if (boundSurface !== s) {
                 boundSurface = s
+                hasAttachedOutput = true
                 try {
                     player.setVideoSurfaceView(sv)
                 } catch (_: Exception) { }
+                adjustSurface()
             }
-            adjustSurface()
         }
     }
 
     fun pauseSurface() {
         surfacePaused = true
         boundSurface = null
-        try {
-            player.clearVideoSurface()
-        } catch (_: Exception) { }
+        if (hasAttachedOutput) {
+            hasAttachedOutput = false
+            try {
+                player.clearVideoSurface()
+            } catch (_: Exception) { }
+        }
     }
 
     fun resumeSurface() {
@@ -148,7 +153,8 @@ class MediaPlayer(val player: ExoPlayer) {
         }
         texture?.let { tv ->
             try {
-                player.setVideoTextureView(tv)
+                hasAttachedOutput = true
+            player.setVideoTextureView(tv)
                 adjustSurface()
             } catch (_: Exception) { }
         }
@@ -186,6 +192,7 @@ class MediaPlayer(val player: ExoPlayer) {
                 tv,
                 FrameLayout.LayoutParams(-1, -1, android.view.Gravity.CENTER)
             )
+            hasAttachedOutput = true
             player.setVideoTextureView(tv)
             adjustVideoView(tv)
         } else {
@@ -204,15 +211,22 @@ class MediaPlayer(val player: ExoPlayer) {
                     width: Int,
                     height: Int
                 ) {
-                    surface?.let { bindSurfaceIfValid(it) }
+                    if (boundSurface === holder.surface) {
+                        adjustSurface()
+                    } else {
+                        surface?.let { bindSurfaceIfValid(it) }
+                    }
                 }
                 override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
                     if (boundSurface === holder.surface) {
                         boundSurface = null
+                        if (hasAttachedOutput) {
+                            hasAttachedOutput = false
+                            try {
+                                player.clearVideoSurface()
+                            } catch (_: Exception) { }
+                        }
                     }
-                    try {
-                        player.clearVideoSurface()
-                    } catch (_: Exception) { }
                 }
             }
             surfaceCallback = cb
@@ -237,9 +251,12 @@ class MediaPlayer(val player: ExoPlayer) {
         } catch (_: Exception) { }
         surfaceCallback = null
 
-        try {
-            player.clearVideoSurface()
-        } catch (_: Exception) { }
+        if (hasAttachedOutput) {
+            hasAttachedOutput = false
+            try {
+                player.clearVideoSurface()
+            } catch (_: Exception) { }
+        }
 
         try {
             val oldHost = host

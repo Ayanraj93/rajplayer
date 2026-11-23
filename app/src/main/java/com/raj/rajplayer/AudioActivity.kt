@@ -36,6 +36,8 @@ class AudioActivity : Activity() {
     companion object {
         @Volatile var visible: Boolean = false
         @Volatile var audioModeSession: Boolean = false
+        @Volatile var cachedArtKey: String = ""
+        @Volatile var cachedArtBitmap: Bitmap? = null
     }
 
     private val MP = ViewGroup.LayoutParams.MATCH_PARENT
@@ -544,15 +546,25 @@ class AudioActivity : Activity() {
         val key = u.toString()
         if (key == artKey) return
         artKey = key
+        if (cachedArtKey == key) {
+            val cached = cachedArtBitmap
+            if (cached != null && !cached.isRecycled) {
+                artImg.setImageBitmap(cached)
+                artNote.visibility = View.GONE
+                return
+            }
+        }
         artImg.setImageBitmap(null)
         artNote.visibility = View.VISIBLE
         pool.execute {
             val b: Bitmap? = try {
-                contentResolver.loadThumbnail(u, Size(600, 600), null)
+                contentResolver.loadThumbnail(u, Size(360, 360), null)
             } catch (e: Exception) {
                 null
             }
             if (b != null) {
+                cachedArtKey = key
+                cachedArtBitmap = b
                 runOnUiThread {
                     if (artKey == key) {
                         artImg.setImageBitmap(b)

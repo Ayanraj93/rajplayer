@@ -520,7 +520,6 @@ open class PlayerActivity : Activity() {
         super.onRestart()
         if (!audioMode && Engine.active) {
             Bg.restoreVideo()
-            attachVideo()
         }
     }
 
