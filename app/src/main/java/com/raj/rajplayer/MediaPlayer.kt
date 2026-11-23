@@ -119,6 +119,20 @@ class MediaPlayer(val player: ExoPlayer) {
         @Suppress("UNUSED_PARAMETER") useTexture: Boolean,
         grading: Boolean
     ) {
+        if (host === container) {
+            val existing = if (grading) texture else surface
+            if (existing != null && existing.parent === container) {
+                try {
+                    if (grading) {
+                        texture?.let { player.setVideoTextureView(it) }
+                    } else {
+                        surface?.let { player.setVideoSurfaceView(it) }
+                    }
+                    adjustSurface()
+                } catch (_: Exception) { }
+                return
+            }
+        }
         val prevHost = host
         val prevListener = layoutChangeListener
         try {

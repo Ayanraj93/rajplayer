@@ -525,30 +525,38 @@ open class PlayerActivity : Activity() {
     }
 
     private fun attachVideo() {
-        try {
-            mp.detachViews()
-        } catch (e: Exception) {
-        }
         mp.attachViews(layout, null, true, ColorGrade.on(this))
         atomic?.excludeSurfacesIn(layout)
         current = layout
         layout.post { ColorGrade.apply(this, layout) }
     }
 
+    private var lastModeSwitchAt = 0L
+
     private fun enterAudioMode() {
-        if (audioChildOpen || !Engine.active) return
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (audioChildOpen || !Engine.active || now - lastModeSwitchAt < 350L) return
+        lastModeSwitchAt = now
         audioChildOpen = true
+        Engine.modeSwitching = true
+        AudioActivity.audioModeSession = true
+        Prefs.setAudioModeSession(this, true)
         ui.removeCallbacks(hideRun)
         try {
             val i = Intent(this, AudioActivity::class.java)
                 .putExtra("cont", true)
                 .putExtra("fromVideo", true)
-                .addFlags(Intent.FLAG_ACTIVITY_NO_ANIMATION)
+                .addFlags(
+                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
+                    Intent.FLAG_ACTIVITY_NO_ANIMATION
+                )
             startActivity(i)
             @Suppress("DEPRECATION")
             overridePendingTransition(0, 0)
         } catch (e: Exception) {
             audioChildOpen = false
+            Engine.modeSwitching = false
             Toast.makeText(this, "Audio Player open nahi hua: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
@@ -1786,10 +1794,13 @@ open class PlayerActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        Engine.playerForeground = true
+        Engine.modeSwitching = false
         if (!audioMode) {
             Prefs.setAudioModeSession(this, false)
             AudioActivity.audioModeSession = false
             Bg.restoreVideo()
+            if (::layout.isInitialized && Engine.active) attachVideo()
         }
         audioChildOpen = false
         Engine.listener = lis
@@ -1800,6 +1811,7 @@ open class PlayerActivity : Activity() {
     }
 
     override fun onPause() {
+        Engine.playerForeground = false
         stopControlAnimations()
         super.onPause()
         Engine.saveProgress()
@@ -1807,7 +1819,7 @@ open class PlayerActivity : Activity() {
             stopVideoImmediatelyIfNeeded()
         } else {
             val allowVideoBg = Prefs.videoBgPlay(this)
-            if ((allowVideoBg || audioMode || audioChildOpen) && Engine.isPlaying()) {
+            if ((allowVideoBg || audioMode || audioChildOpen || AudioActivity.audioModeSession || Engine.modeSwitching) && Engine.isPlaying()) {
                 PlaybackService.start(this)
             }
         }
@@ -1816,7 +1828,9 @@ open class PlayerActivity : Activity() {
     override fun onStop() {
         super.onStop()
         val allowVideoBg = Prefs.videoBgPlay(this)
-        if (Engine.isPlaying() && !allowVideoBg && !audioMode && !audioChildOpen) {
+        val switchingToAudio = audioMode || audioChildOpen || AudioActivity.audioModeSession ||
+            AudioActivity.visible || Engine.modeSwitching || Prefs.audioModeSession(this)
+        if (Engine.isPlaying() && !allowVideoBg && !switchingToAudio) {
             Engine.pause()
             if (isFinishing) PlaybackService.stop(this)
         }
@@ -1844,7 +1858,7 @@ open class PlayerActivity : Activity() {
             current = null
         }
         ColorGrade.hdrWindow(this, false)
-        val keepAudioSession = Prefs.audioModeSession(this)
+        val keepAudioSession = Prefs.audioModeSession(this) || AudioActivity.audioModeSession || AudioActivity.visible || audioChildOpen || Engine.modeSwitching
         if (!Engine.bgAudio && Engine.listener == null && !keepAudioSession) {
             Engine.stopAll(this)
         } else if (Engine.active && Engine.isPlaying() && (Engine.bgAudio || keepAudioSession)) {

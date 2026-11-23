@@ -50,6 +50,10 @@ object Engine {
         private set
     @Volatile private var forceDav1dForCurrentItem: Boolean = false
     @Volatile private var av1FallbackTried: Boolean = false
+    @Volatile private var forceSoftwareVideoForCurrentItem: Boolean = false
+    @Volatile private var swFallbackTried: Boolean = false
+    @Volatile var playerForeground: Boolean = false
+    @Volatile var modeSwitching: Boolean = false
 
     private lateinit var app: Context
     private val main = Handler(Looper.getMainLooper())
@@ -95,10 +99,18 @@ object Engine {
         app = ctx.applicationContext
         registerAudioDeviceCallback()
         mp?.let { return it }
+        val am = app.getSystemService(Context.ACTIVITY_SERVICE) as? android.app.ActivityManager
+        val lowMem = (am?.isLowRamDevice == true) || !android.os.Process.is64Bit() ||
+            (Runtime.getRuntime().maxMemory() <= 256L * 1024L * 1024L)
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(30000, 60000, 1000, 2500)
-            .setTargetBufferBytes(96 * 1024 * 1024)
-            .setBackBuffer(10000, true)
+            .setBufferDurationsMs(
+                if (lowMem) 15000 else 25000,
+                if (lowMem) 30000 else 50000,
+                250,
+                if (lowMem) 750 else 1000
+            )
+            .setTargetBufferBytes(if (lowMem) 20 * 1024 * 1024 else 48 * 1024 * 1024)
+            .setBackBuffer(if (lowMem) 3000 else 5000, false)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
         val av1AwareSelector = MediaCodecSelector { mimeType, requiresSecureDecoder, requiresTunnelingDecoder ->
@@ -107,7 +119,14 @@ object Engine {
                 requiresSecureDecoder,
                 requiresTunnelingDecoder
             )
-            if (MimeTypes.VIDEO_AV1.equals(mimeType, ignoreCase = true) && Dav1dLibrary.isAvailable()) {
+            if (forceSoftwareVideoForCurrentItem && mimeType.startsWith("video/", ignoreCase = true)) {
+                val swCodecs = codecs.filter {
+                    it.softwareOnly || !it.hardwareAccelerated ||
+                        it.name.startsWith("OMX.google.", ignoreCase = true) ||
+                        it.name.startsWith("c2.android.", ignoreCase = true)
+                }
+                if (swCodecs.isNotEmpty()) swCodecs else codecs
+            } else if (MimeTypes.VIDEO_AV1.equals(mimeType, ignoreCase = true) && Dav1dLibrary.isAvailable()) {
                 if (forceDav1dForCurrentItem) {
                     emptyList()
                 } else {
@@ -121,10 +140,14 @@ object Engine {
         val renderers = DefaultRenderersFactory(app)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setMediaCodecSelector(av1AwareSelector)
-            .forceEnableMediaCodecAsynchronousQueueing()
             .setEnableDecoderFallback(true)
             // Force Media3's Sonic time-stretch path instead of device-specific AudioTrack speed.
             .setEnableAudioOutputPlaybackParameters(false)
+            .apply {
+                if (android.os.Build.VERSION.SDK_INT >= 31) {
+                    forceEnableMediaCodecAsynchronousQueueing()
+                }
+            }
         val mediaAudioAttrs = androidx.media3.common.AudioAttributes.Builder()
             .setUsage(androidx.media3.common.C.USAGE_MEDIA)
             .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
@@ -157,23 +180,49 @@ object Engine {
                 notifyChanged()
             }
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
-                val isDecoderFailure = error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
-                    error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED
-                if (isDecoderFailure && isVideo && !av1FallbackTried && Dav1dLibrary.isAvailable() && items.isNotEmpty()) {
-                    av1FallbackTried = true
-                    forceDav1dForCurrentItem = true
-                    val retryPos = exo.currentPosition.coerceAtLeast(0L)
-                    val uri = items[idx]
-                    videoDecoderName = "Switching to dav1d AV1 fallback…"
-                    exo.stop()
-                    mp?.recreateSurface()
-                    val retryItem = MediaItem.Builder().setUri(uri).setMediaId(uri.toString()).build()
-                    exo.setMediaItem(retryItem, retryPos)
-                    exo.prepare()
-                    exo.playWhenReady = true
-                    exo.play()
-                    notifyChanged()
-                    return
+                val isDecoderFailure =
+                    error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
+                    error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED ||
+                    error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED ||
+                    error.errorCode == PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES
+                if (isDecoderFailure && isVideo && items.isNotEmpty()) {
+                    val hasAv1 = exo.currentTracks.groups.any { g ->
+                        (0 until g.length).any { i ->
+                            MimeTypes.VIDEO_AV1.equals(g.getTrackFormat(i).sampleMimeType, ignoreCase = true)
+                        }
+                    }
+                    if (hasAv1 && !av1FallbackTried && Dav1dLibrary.isAvailable()) {
+                        av1FallbackTried = true
+                        forceDav1dForCurrentItem = true
+                        val retryPos = exo.currentPosition.coerceAtLeast(0L)
+                        val uri = items[idx]
+                        videoDecoderName = "Switching to dav1d AV1 fallback…"
+                        exo.stop()
+                        mp?.recreateSurface()
+                        val retryItem = MediaItem.Builder().setUri(uri).setMediaId(uri.toString()).build()
+                        exo.setMediaItem(retryItem, retryPos)
+                        exo.prepare()
+                        exo.playWhenReady = true
+                        exo.play()
+                        notifyChanged()
+                        return
+                    }
+                    if (!swFallbackTried) {
+                        swFallbackTried = true
+                        forceSoftwareVideoForCurrentItem = true
+                        val retryPos = exo.currentPosition.coerceAtLeast(0L)
+                        val uri = items[idx]
+                        videoDecoderName = "Switching to software video decoder…"
+                        exo.stop()
+                        mp?.recreateSurface()
+                        val retryItem = MediaItem.Builder().setUri(uri).setMediaId(uri.toString()).build()
+                        exo.setMediaItem(retryItem, retryPos)
+                        exo.prepare()
+                        exo.playWhenReady = true
+                        exo.play()
+                        notifyChanged()
+                        return
+                    }
                 }
                 active = false
                 releaseLocks()
@@ -235,10 +284,13 @@ object Engine {
         Prefs.setLastPlayedUri(app, uri.toString())
         val needsFreshSurface = isVideo && (
             forceDav1dForCurrentItem ||
+            forceSoftwareVideoForCurrentItem ||
             videoDecoderName.contains("dav1d", ignoreCase = true)
         )
         forceDav1dForCurrentItem = false
         av1FallbackTried = false
+        forceSoftwareVideoForCurrentItem = false
+        swFallbackTried = false
         videoDecoderName = "Initializing MediaCodec…"
         ended = false
         resumeOnFocus = false

@@ -213,6 +213,22 @@ class MainActivity : Activity() {
             if (resultCode == RESULT_OK) afterDelete() else toast("Delete cancelled")
             return
         }
+        if (requestCode == 10) {
+            val u = deletingUri
+            deletingUri = null
+            if (resultCode == RESULT_OK && u != null) {
+                try {
+                    if (contentResolver.delete(u, null, null) <= 0) tryDirectFileDelete(u)
+                } catch (_: Exception) {
+                    tryDirectFileDelete(u)
+                }
+                deleteNextPending()
+            } else {
+                pendingDeleteUris.clear()
+                toast("Delete cancelled")
+            }
+            return
+        }
         if (resultCode != RESULT_OK) return
         val u = data?.data ?: return
         if (requestCode == 2) openUri(u, null)
@@ -281,6 +297,7 @@ class MainActivity : Activity() {
         val l = ArrayList<String>()
         l.add(perm())
         if (audioPerm() != perm()) l.add(audioPerm())
+        if (Build.VERSION.SDK_INT <= 29) l.add(Manifest.permission.WRITE_EXTERNAL_STORAGE)
         if (Build.VERSION.SDK_INT >= 33) l.add(Manifest.permission.POST_NOTIFICATIONS)
         requestPermissions(l.toTypedArray(), 1)
     }
@@ -773,6 +790,59 @@ class MainActivity : Activity() {
             .show()
     }
 
+    private val pendingDeleteUris = ArrayDeque<Uri>()
+    private var deletingUri: Uri? = null
+
+    private fun tryDirectFileDelete(u: Uri): Boolean {
+        try {
+            contentResolver.query(u, arrayOf(MediaStore.MediaColumns.DATA), null, null, null)?.use { c ->
+                if (c.moveToFirst()) {
+                    val p = c.getString(0)
+                    if (!p.isNullOrEmpty()) {
+                        val f = java.io.File(p)
+                        if (f.exists() && f.delete()) {
+                            try { contentResolver.delete(u, null, null) } catch (_: Exception) { }
+                            return true
+                        }
+                    }
+                }
+            }
+        } catch (_: Exception) { }
+        return false
+    }
+
+    private fun deleteNextPending() {
+        while (pendingDeleteUris.isNotEmpty()) {
+            val u = pendingDeleteUris.removeFirst()
+            try {
+                val rows = contentResolver.delete(u, null, null)
+                if (rows <= 0) tryDirectFileDelete(u)
+            } catch (se: SecurityException) {
+                if (Build.VERSION.SDK_INT >= 29 && se is android.app.RecoverableSecurityException) {
+                    deletingUri = u
+                    try {
+                        startIntentSenderForResult(
+                            se.userAction.actionIntent.intentSender,
+                            10, null, 0, 0, 0
+                        )
+                        return
+                    } catch (ex: Exception) {
+                        toast("Delete failed: " + ex.message)
+                        return
+                    }
+                } else if (!tryDirectFileDelete(u)) {
+                    toast("Delete failed: " + se.message)
+                    return
+                }
+            } catch (e: Exception) {
+                toast("Delete failed: " + e.message)
+                return
+            }
+        }
+        deletingUri = null
+        afterDelete()
+    }
+
     private fun doDelete() {
         val uris = selected.map { Uri.parse(it) }
         try {
@@ -780,8 +850,10 @@ class MainActivity : Activity() {
                 val pi = MediaStore.createDeleteRequest(contentResolver, uris)
                 startIntentSenderForResult(pi.intentSender, 9, null, 0, 0, 0)
             } else {
-                for (u in uris) contentResolver.delete(u, null, null)
-                afterDelete()
+                pendingDeleteUris.clear()
+                pendingDeleteUris.addAll(uris)
+                deletingUri = null
+                deleteNextPending()
             }
         } catch (e: Exception) {
             toast("Delete failed: " + e.message)

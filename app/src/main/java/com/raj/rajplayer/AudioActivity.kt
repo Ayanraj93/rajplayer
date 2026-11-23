@@ -92,7 +92,7 @@ class AudioActivity : Activity() {
             if (rgbTargets.isNotEmpty()) {
                 val col = Theme.rgbNow(0f)
                 for (t in rgbTargets) t(col)
-                ui.postDelayed(this, 70)
+                ui.postDelayed(this, 120)
             }
         }
     }
@@ -196,6 +196,7 @@ class AudioActivity : Activity() {
         if (switchingToVideo) return
         val uri = Engine.items.getOrNull(Engine.idx) ?: return
         switchingToVideo = true
+        Engine.modeSwitching = true
         Prefs.setAudioModeSession(this, false)
         audioModeSession = false
         Bg.restoreVideo()
@@ -219,6 +220,9 @@ class AudioActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        try {
+            window.setBackgroundDrawable(android.graphics.drawable.ColorDrawable(audioPalette(Prefs.audioTheme(this))[0]))
+        } catch (_: Exception) { }
         requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
         if (intent.getBooleanExtra("fromVideo", false)) {
             audioModeSession = true
@@ -690,10 +694,23 @@ class AudioActivity : Activity() {
             .show()
     }
 
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        if (intent.getBooleanExtra("fromVideo", false)) {
+            audioModeSession = true
+            Prefs.setAudioModeSession(this, true)
+        }
+        switchingToVideo = false
+        Engine.modeSwitching = false
+        if (Engine.active) onItem()
+    }
+
     override fun onResume() {
         super.onResume()
         visible = true
         switchingToVideo = false
+        Engine.modeSwitching = false
         if (Engine.active && Engine.isPlaying()) PlaybackService.start(this)
         settingsGearMotion?.stop()
         settingsGearMotion = GearMotion(gearButton).also { it.start() }
@@ -725,8 +742,8 @@ class AudioActivity : Activity() {
 
     override fun onStop() {
         super.onStop()
-        if (Prefs.audioModeSession(this) &&
-            Engine.active && Engine.isPlaying() && Engine.isVideo) {
+        if (!switchingToVideo && !isFinishing && !Engine.playerForeground && !Engine.modeSwitching &&
+            Prefs.audioModeSession(this) && Engine.active && Engine.isPlaying() && Engine.isVideo) {
             Engine.saveProgress()
             Bg.toAudioOnly()
         }
