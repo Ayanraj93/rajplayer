@@ -116,13 +116,14 @@ class MediaPlayer(val player: ExoPlayer) {
         }
     }
 
-    private fun bindSurfaceIfValid(holder: android.view.SurfaceHolder) {
+    private fun bindSurfaceIfValid(sv: SurfaceView) {
+        val holder = sv.holder
         val s = holder.surface
         if (!surfacePaused && s != null && s.isValid) {
             if (boundSurface !== s) {
                 boundSurface = s
                 try {
-                    player.setVideoSurface(s)
+                    player.setVideoSurfaceView(sv)
                 } catch (_: Exception) { }
             }
             adjustSurface()
@@ -140,7 +141,7 @@ class MediaPlayer(val player: ExoPlayer) {
     fun resumeSurface() {
         surfacePaused = false
         surface?.let { sv ->
-            bindSurfaceIfValid(sv.holder)
+            bindSurfaceIfValid(sv)
             return
         }
         texture?.let { tv ->
@@ -193,7 +194,7 @@ class MediaPlayer(val player: ExoPlayer) {
 
             val cb = object : android.view.SurfaceHolder.Callback {
                 override fun surfaceCreated(holder: android.view.SurfaceHolder) {
-                    bindSurfaceIfValid(holder)
+                    surface?.let { bindSurfaceIfValid(it) }
                 }
                 override fun surfaceChanged(
                     holder: android.view.SurfaceHolder,
@@ -201,14 +202,14 @@ class MediaPlayer(val player: ExoPlayer) {
                     width: Int,
                     height: Int
                 ) {
-                    bindSurfaceIfValid(holder)
+                    surface?.let { bindSurfaceIfValid(it) }
                 }
                 override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
                     if (boundSurface === holder.surface) {
                         boundSurface = null
                     }
                     try {
-                        player.clearVideoSurface(holder.surface)
+                        player.clearVideoSurface()
                     } catch (_: Exception) { }
                 }
             }
@@ -219,7 +220,7 @@ class MediaPlayer(val player: ExoPlayer) {
                 sv,
                 FrameLayout.LayoutParams(-1, -1, android.view.Gravity.CENTER)
             )
-            bindSurfaceIfValid(sv.holder)
+            bindSurfaceIfValid(sv)
             adjustSurface()
         }
     }

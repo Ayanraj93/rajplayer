@@ -142,14 +142,10 @@ object Engine {
         val renderers = DefaultRenderersFactory(app)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
             .setMediaCodecSelector(av1AwareSelector)
+            .forceEnableMediaCodecAsynchronousQueueing()
             .setEnableDecoderFallback(true)
             // Force Media3's Sonic time-stretch path instead of device-specific AudioTrack speed.
             .setEnableAudioOutputPlaybackParameters(false)
-            .apply {
-                if (android.os.Build.VERSION.SDK_INT >= 31) {
-                    forceEnableMediaCodecAsynchronousQueueing()
-                }
-            }
         val mediaAudioAttrs = androidx.media3.common.AudioAttributes.Builder()
             .setUsage(androidx.media3.common.C.USAGE_MEDIA)
             .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
