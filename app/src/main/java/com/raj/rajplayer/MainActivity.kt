@@ -132,8 +132,11 @@ class MainActivity : Activity() {
     // ================= lifecycle =================
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        if (!AppSecurity.verify(this)) { finishAffinity(); android.os.Process.killProcess(android.os.Process.myPid()); return }
         frame = FrameLayout(this)
         setContentView(frame)
+        AdManager.init(this)
+        frame.post { AdManager.attachBanner(this, frame) }
         Engine.bgAudio = Prefs.bgAudio(this)
         ui.postDelayed({ Engine.ensure(applicationContext) }, 400)
         if (handleIncoming(intent)) finish()
@@ -152,6 +155,7 @@ class MainActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        AdManager.showPendingInterstitial(this)
         if (isFinishing) return
         if (!hasPerm() && (!asked || permissionGrantedAtPause)) {
             asked = true

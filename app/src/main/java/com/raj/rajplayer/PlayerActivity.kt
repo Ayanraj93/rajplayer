@@ -1754,6 +1754,7 @@ open class PlayerActivity : Activity() {
         titleRgbAnimator = null
         titleRgbShader = null
         super.onDestroy()
+        AdManager.markVideoExited()
         ui.removeCallbacksAndMessages(null)
         if (Engine.listener === lis) Engine.listener = null
         if (::layout.isInitialized && current === layout) {
