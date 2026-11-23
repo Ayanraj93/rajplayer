@@ -296,13 +296,24 @@ object Engine {
     fun pause() { resumeOnFocus = false; resumeAfterBluetooth = false; mp?.pause(); saveProgress(); releaseLocks() }
     fun next(ctx: Context) {
         if (items.isEmpty()) return
-        if (Prefs.shuffleFor(app, isVideo) && items.size > 1) loadAt(ctx, randomOther())
+        if (items.size == 1) {
+            mp?.setTime(0)
+            notifyChanged()
+            return
+        }
+        if (Prefs.shuffleFor(app, isVideo)) loadAt(ctx, randomOther())
         else if (idx + 1 < items.size) loadAt(ctx, idx + 1)
-        else if (Prefs.repeatFor(app, isVideo) == 1) loadAt(ctx, 0)
+        else loadAt(ctx, 0)
     }
     fun prev(ctx: Context) {
-        val p = mp ?: return
-        if (p.getTime() > 3000 || idx == 0) p.setTime(0) else loadAt(ctx, idx - 1)
+        if (items.isEmpty()) return
+        if (items.size == 1) {
+            mp?.setTime(0)
+            notifyChanged()
+            return
+        }
+        val target = if (idx > 0) idx - 1 else items.lastIndex
+        loadAt(ctx, target)
     }
     fun seekTo(ms: Long) { mp?.setTime(ms); notifyChanged() }
     fun saveProgress() {

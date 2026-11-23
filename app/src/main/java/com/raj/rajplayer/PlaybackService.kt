@@ -62,9 +62,11 @@ class PlaybackService : Service() {
             }
             override fun onSkipToNext() {
                 Engine.next(this@PlaybackService)
+                refresh()
             }
             override fun onSkipToPrevious() {
                 Engine.prev(this@PlaybackService)
+                refresh()
             }
             override fun onSeekTo(pos: Long) {
                 Engine.seekTo(pos)
