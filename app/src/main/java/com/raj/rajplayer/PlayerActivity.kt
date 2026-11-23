@@ -542,6 +542,7 @@ open class PlayerActivity : Activity() {
         AudioActivity.audioModeSession = true
         Prefs.setAudioModeSession(this, true)
         ui.removeCallbacks(hideRun)
+        Engine.mp?.pauseSurface()
         try {
             val i = Intent(this, AudioActivity::class.java)
                 .putExtra("cont", true)
@@ -1826,6 +1827,7 @@ open class PlayerActivity : Activity() {
     }
 
     override fun onStop() {
+        if (!isInPictureInPictureMode) Engine.mp?.pauseSurface()
         super.onStop()
         val allowVideoBg = Prefs.videoBgPlay(this)
         val switchingToAudio = audioMode || audioChildOpen || AudioActivity.audioModeSession ||

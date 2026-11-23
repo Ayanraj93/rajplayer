@@ -37,6 +37,9 @@ class MediaPlayer(val player: ExoPlayer) {
     private var loudness: android.media.audiofx.LoudnessEnhancer? = null
     private var scaleType: ScaleType = ScaleType.SURFACE_BEST_FIT
     private var layoutChangeListener: android.view.View.OnLayoutChangeListener? = null
+    private var surfaceCallback: android.view.SurfaceHolder.Callback? = null
+    private var boundSurface: android.view.Surface? = null
+    @Volatile private var surfacePaused: Boolean = false
 
     init {
         player.addListener(object : androidx.media3.common.Player.Listener {
@@ -113,6 +116,41 @@ class MediaPlayer(val player: ExoPlayer) {
         }
     }
 
+    private fun bindSurfaceIfValid(holder: android.view.SurfaceHolder) {
+        val s = holder.surface
+        if (!surfacePaused && s != null && s.isValid) {
+            if (boundSurface !== s) {
+                boundSurface = s
+                try {
+                    player.setVideoSurface(s)
+                } catch (_: Exception) { }
+            }
+            adjustSurface()
+        }
+    }
+
+    fun pauseSurface() {
+        surfacePaused = true
+        boundSurface = null
+        try {
+            player.clearVideoSurface()
+        } catch (_: Exception) { }
+    }
+
+    fun resumeSurface() {
+        surfacePaused = false
+        surface?.let { sv ->
+            bindSurfaceIfValid(sv.holder)
+            return
+        }
+        texture?.let { tv ->
+            try {
+                player.setVideoTextureView(tv)
+                adjustSurface()
+            } catch (_: Exception) { }
+        }
+    }
+
     fun attachViews(
         container: FrameLayout,
         @Suppress("UNUSED_PARAMETER") subtitles: Any?,
@@ -122,32 +160,17 @@ class MediaPlayer(val player: ExoPlayer) {
         if (host === container) {
             val existing = if (grading) texture else surface
             if (existing != null && existing.parent === container) {
-                try {
-                    if (grading) {
-                        texture?.let { player.setVideoTextureView(it) }
-                    } else {
-                        surface?.let { player.setVideoSurfaceView(it) }
-                    }
-                    adjustSurface()
-                } catch (_: Exception) { }
+                resumeSurface()
                 return
             }
         }
-        val prevHost = host
-        val prevListener = layoutChangeListener
-        try {
-            if (prevListener != null) prevHost?.removeOnLayoutChangeListener(prevListener)
-            if (prevHost != null && prevHost !== container) prevHost.removeAllViews()
-        } catch (_: Exception) { }
-        layoutChangeListener = null
-        surface = null
-        texture = null
 
+        detachViews()
+        surfacePaused = false
         host = container
         container.removeAllViews()
 
-        val listener = android.view.View.OnLayoutChangeListener {
-                _, _, _, _, _, _, _, _, _ ->
+        val listener = android.view.View.OnLayoutChangeListener { _, _, _, _, _, _, _, _, _ ->
             adjustSurface()
         }
         layoutChangeListener = listener
@@ -156,44 +179,64 @@ class MediaPlayer(val player: ExoPlayer) {
         if (grading) {
             val tv = TextureView(container.context)
             texture = tv
-
             container.addView(
                 tv,
-                FrameLayout.LayoutParams(
-                    -1,
-                    -1,
-                    android.view.Gravity.CENTER
-                )
+                FrameLayout.LayoutParams(-1, -1, android.view.Gravity.CENTER)
             )
-
             player.setVideoTextureView(tv)
             adjustVideoView(tv)
         } else {
             val sv = SurfaceView(container.context)
             surface = sv
-
             sv.keepScreenOn = true
             sv.holder.setFormat(PixelFormat.OPAQUE)
 
+            val cb = object : android.view.SurfaceHolder.Callback {
+                override fun surfaceCreated(holder: android.view.SurfaceHolder) {
+                    bindSurfaceIfValid(holder)
+                }
+                override fun surfaceChanged(
+                    holder: android.view.SurfaceHolder,
+                    format: Int,
+                    width: Int,
+                    height: Int
+                ) {
+                    bindSurfaceIfValid(holder)
+                }
+                override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
+                    if (boundSurface === holder.surface) {
+                        boundSurface = null
+                    }
+                    try {
+                        player.clearVideoSurface(holder.surface)
+                    } catch (_: Exception) { }
+                }
+            }
+            surfaceCallback = cb
+            sv.holder.addCallback(cb)
+
             container.addView(
                 sv,
-                FrameLayout.LayoutParams(
-                    -1,
-                    -1,
-                    android.view.Gravity.CENTER
-                )
+                FrameLayout.LayoutParams(-1, -1, android.view.Gravity.CENTER)
             )
-
-            player.setVideoSurfaceView(sv)
+            bindSurfaceIfValid(sv.holder)
             adjustSurface()
         }
     }
 
     fun detachViews() {
+        surfacePaused = true
+        boundSurface = null
+        try {
+            surfaceCallback?.let { cb ->
+                surface?.holder?.removeCallback(cb)
+            }
+        } catch (_: Exception) { }
+        surfaceCallback = null
+
         try {
             player.clearVideoSurface()
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) { }
 
         try {
             val oldHost = host
@@ -201,8 +244,7 @@ class MediaPlayer(val player: ExoPlayer) {
                 oldHost?.removeOnLayoutChangeListener(listener)
             }
             oldHost?.removeAllViews()
-        } catch (_: Exception) {
-        }
+        } catch (_: Exception) { }
 
         layoutChangeListener = null
         surface = null
@@ -213,6 +255,7 @@ class MediaPlayer(val player: ExoPlayer) {
     fun recreateSurface() {
         val container = host ?: return
         val grading = texture != null
+        detachViews()
         attachViews(container, null, true, grading)
     }
 
@@ -398,9 +441,12 @@ class MediaPlayer(val player: ExoPlayer) {
     }
 
     fun setVideoTrack(id: Int) {
+        val disable = id < 0
+        val alreadyDisabled = player.trackSelectionParameters.disabledTrackTypes.contains(C.TRACK_TYPE_VIDEO)
+        if (disable == alreadyDisabled) return
         player.trackSelectionParameters =
             player.trackSelectionParameters.buildUpon()
-                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, id < 0)
+                .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, disable)
                 .build()
     }
 

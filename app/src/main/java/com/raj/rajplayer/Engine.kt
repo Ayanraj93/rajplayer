@@ -54,6 +54,8 @@ object Engine {
     @Volatile private var swFallbackTried: Boolean = false
     @Volatile var playerForeground: Boolean = false
     @Volatile var modeSwitching: Boolean = false
+    @Volatile private var surfaceRecoveryCount: Int = 0
+    @Volatile private var lastSurfaceRecoveryAt: Long = 0L
 
     private lateinit var app: Context
     private val main = Handler(Looper.getMainLooper())
@@ -166,7 +168,7 @@ object Engine {
         exo.addListener(object : Player.Listener {
             override fun onPlaybackStateChanged(state: Int) {
                 when (state) {
-                    Player.STATE_READY -> { active = true; if (exo.isPlaying) holdLocks(); notifyChanged() }
+                    Player.STATE_READY -> { active = true; surfaceRecoveryCount = 0; if (exo.isPlaying) holdLocks(); notifyChanged() }
                     Player.STATE_ENDED -> onEnded()
                     Player.STATE_BUFFERING -> notifyChanged()
                     Player.STATE_IDLE -> notifyChanged()
@@ -180,6 +182,38 @@ object Engine {
                 notifyChanged()
             }
             override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
+                val errText = generateSequence(error as Throwable?) { it.cause }
+                    .mapNotNull { it.message }
+                    .joinToString(" ")
+                val isSurfaceBreak =
+                    errText.contains("ANativeWindow", ignoreCase = true) ||
+                    errText.contains("output buffer to surface", ignoreCase = true) ||
+                    errText.contains("Surface has been released", ignoreCase = true) ||
+                    errText.contains("BufferQueue", ignoreCase = true) ||
+                    errText.contains("abandoned", ignoreCase = true)
+                val nowMs = android.os.SystemClock.elapsedRealtime()
+                if (nowMs - lastSurfaceRecoveryAt > 6000L) surfaceRecoveryCount = 0
+                if (isSurfaceBreak && items.isNotEmpty() && surfaceRecoveryCount < 8) {
+                    surfaceRecoveryCount++
+                    lastSurfaceRecoveryAt = nowMs
+                    val retryPos = exo.currentPosition.coerceAtLeast(0L)
+                    val wasPlaying = exo.playWhenReady || exo.isPlaying
+                    val uri = items[idx]
+                    mp?.pauseSurface()
+                    exo.stop()
+                    val retryItem = MediaItem.Builder().setUri(uri).setMediaId(uri.toString()).build()
+                    exo.setMediaItem(retryItem, retryPos)
+                    exo.prepare()
+                    exo.playWhenReady = wasPlaying
+                    if (wasPlaying) exo.play()
+                    if (playerForeground) {
+                        main.postDelayed({
+                            if (playerForeground && active) mp?.resumeSurface()
+                        }, 60L)
+                    }
+                    notifyChanged()
+                    return
+                }
                 val isDecoderFailure =
                     error.errorCode == PlaybackException.ERROR_CODE_DECODER_INIT_FAILED ||
                     error.errorCode == PlaybackException.ERROR_CODE_DECODING_FAILED ||
