@@ -77,6 +77,22 @@ open class PlayerActivity : Activity() {
     private var controlAnimsRunning = false
     private var keepControlsHiddenOnPause = false
     private var resumeBarRef: LinearLayout? = null
+    private fun updateResumeBarPosition() {
+        val bar = resumeBarRef ?: return
+        val isLand = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        bar.layoutParams = if (isLand) {
+            FrameLayout.LayoutParams(WC, WC, Gravity.BOTTOM or Gravity.START).apply {
+                leftMargin = dp(44)
+                bottomMargin = dp(100)
+            }
+        } else {
+            FrameLayout.LayoutParams(WC, WC, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                leftMargin = dp(14)
+                rightMargin = dp(14)
+                bottomMargin = dp(86)
+            }
+        }
+    }
     private var hideResumeBannerRef: Runnable? = null
     private var lastPlayingState: Boolean? = null
     private var audioSettingsAnimator: ValueAnimator? = null
@@ -376,6 +392,7 @@ open class PlayerActivity : Activity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        updateResumeBarPosition()
         resetZoom()
         hideBars()
     }
@@ -728,6 +745,7 @@ open class PlayerActivity : Activity() {
             hideResumeBannerRef?.let { ui.removeCallbacks(it) }
             val savedPos = Prefs.pos(this, cu.toString())
             if (savedPos > 5000L) {
+                updateResumeBarPosition()
                 bar.alpha = 1f
                 bar.visibility = View.VISIBLE
                 bar.bringToFront()
@@ -1611,10 +1629,10 @@ open class PlayerActivity : Activity() {
         val resumeBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = Gravity.CENTER_VERTICAL
-            setPadding(dp(14), dp(10), dp(14), dp(10))
+            setPadding(dp(14), dp(11), dp(16), dp(11))
             background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(0xE6181818.toInt())
-                cornerRadius = dp(24).toFloat()
+                setColor(0xCC202020.toInt())
+                cornerRadius = dp(6).toFloat()
             }
             elevation = dp(6).toFloat()
             visibility = View.GONE
@@ -1623,24 +1641,24 @@ open class PlayerActivity : Activity() {
         }
         val resumeCloseBtn = TextView(this).apply {
             text = "\u2715"
-            textSize = 16f
-            setTextColor(0xFFE0E0E0.toInt())
-            setPadding(dp(4), dp(2), dp(10), dp(2))
+            textSize = 15f
+            setTextColor(0xFFFFFFFF.toInt())
+            setPadding(dp(2), dp(2), dp(12), dp(2))
         }
         val resumeMsgTv = TextView(this).apply {
             text = "Continue from where you stopped."
             textSize = 13.5f
-            setTextColor(0xFFF5F5F5.toInt())
+            setTextColor(0xFFF2F2F2.toInt())
         }
         val startOverBtn = TextView(this).apply {
             text = "START OVER"
             textSize = 13f
             setTypeface(null, android.graphics.Typeface.BOLD)
-            setTextColor(0xFFFF4081.toInt())
-            setPadding(dp(12), dp(4), dp(4), dp(4))
+            setTextColor(0xFFF2A7A7.toInt())
+            setPadding(dp(16), dp(2), dp(2), dp(2))
         }
         resumeBar.addView(resumeCloseBtn, LinearLayout.LayoutParams(WC, WC))
-        resumeBar.addView(resumeMsgTv, LinearLayout.LayoutParams(0, WC, 1f))
+        resumeBar.addView(resumeMsgTv, LinearLayout.LayoutParams(WC, WC))
         resumeBar.addView(startOverBtn, LinearLayout.LayoutParams(WC, WC))
 
         val hideResumeBanner = Runnable {
@@ -1664,10 +1682,18 @@ open class PlayerActivity : Activity() {
             showMsg("Started from beginning")
         }
 
-        val resumeLp = FrameLayout.LayoutParams(MP, WC, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
-            leftMargin = dp(14)
-            rightMargin = dp(14)
-            bottomMargin = dp(76)
+        val isLandNow = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val resumeLp = if (isLandNow) {
+            FrameLayout.LayoutParams(WC, WC, Gravity.BOTTOM or Gravity.START).apply {
+                leftMargin = dp(44)
+                bottomMargin = dp(100)
+            }
+        } else {
+            FrameLayout.LayoutParams(WC, WC, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+                leftMargin = dp(14)
+                rightMargin = dp(14)
+                bottomMargin = dp(86)
+            }
         }
         root.addView(resumeBar, resumeLp)
         resumeBarRef = resumeBar
