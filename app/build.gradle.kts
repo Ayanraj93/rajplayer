@@ -63,7 +63,7 @@ kotlin {
 }
 
 dependencies {
-    implementation("com.google.android.gms:play-services-ads:23.6.0")
+    // implementation("com.google.android.gms:play-services-ads:23.6.0")
     val media3Version = "1.11.1"
     implementation("androidx.media3:media3-exoplayer:$media3Version")
     implementation("androidx.media3:media3-decoder-av1:$media3Version")

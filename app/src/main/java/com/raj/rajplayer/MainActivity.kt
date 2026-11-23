@@ -556,11 +556,39 @@ class MainActivity : Activity() {
     }
 
     private fun refreshContainer(content: View, accent: Int): SwipeRefreshLayout {
-        val swipe = SwipeRefreshLayout(this)
+        fun canAnyChildScrollUp(v: View?): Boolean {
+            if (v == null || v.visibility != View.VISIBLE) return false
+            if (v is ListView) {
+                if (v.childCount > 0 && (v.firstVisiblePosition > 0 || v.getChildAt(0).top < v.paddingTop)) {
+                    return true
+                }
+            } else if (v is ScrollView) {
+                if (v.scrollY > 0) return true
+            } else if (v.canScrollVertically(-1)) {
+                return true
+            }
+            if (v is ViewGroup) {
+                for (i in 0 until v.childCount) {
+                    if (canAnyChildScrollUp(v.getChildAt(i))) return true
+                }
+            }
+            return false
+        }
+        val swipe = object : SwipeRefreshLayout(this) {
+            private var allowPull = false
+            override fun onInterceptTouchEvent(ev: android.view.MotionEvent): Boolean {
+                if (ev.actionMasked == android.view.MotionEvent.ACTION_DOWN) {
+                    val inTopHalf = height <= 0 || ev.y <= height * 0.5f
+                    allowPull = inTopHalf && !canAnyChildScrollUp(content)
+                }
+                if (!allowPull) return false
+                return super.onInterceptTouchEvent(ev)
+            }
+        }
         swipe.setColorSchemeColors(accent, Theme.rgbNow(120f), Theme.rgbNow(240f))
-        // Pull-to-refresh rebuilds the list and resets its scroll position. Disable it
-        // completely while selecting so drag-selection and scrolling never trigger refresh.
         swipe.isEnabled = !selectMode
+        swipe.setDistanceToTriggerSync((130 * resources.displayMetrics.density).toInt())
+        swipe.setOnChildScrollUpCallback { _, child -> canAnyChildScrollUp(child) }
         swipe.setOnRefreshListener {
             if (selectMode) {
                 swipe.isRefreshing = false

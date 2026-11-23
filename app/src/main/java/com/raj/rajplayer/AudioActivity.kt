@@ -297,13 +297,17 @@ class AudioActivity : Activity() {
         val hdr = TextView(this)
         hdr.text = if (videoSession) "BACKGROUND PLAY" else "NOW PLAYING"
         hdr.textSize = 13f
+        hdr.setTypeface(null, android.graphics.Typeface.BOLD)
         hdr.setTextColor(tc)
+        hdr.alpha = 1f
+        hdr.setShadowLayer(4f, 0f, 1f, 0xFF000000.toInt())
         hdr.gravity = Gravity.CENTER
         hdr.setSingleLine(true)
-        hdr.setHorizontallyScrolling(true)
         backgroundTitleView = hdr
-        hdr.translationY = -dp(5).toFloat()
-        top.addView(hdr, LinearLayout.LayoutParams(0, WC, 1f))
+        val hdrLp = LinearLayout.LayoutParams(MP, WC)
+        hdrLp.bottomMargin = dp(4)
+        col.addView(hdr, hdrLp)
+        top.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
         val settingsGear = ib("\u2699", 22f, ic) { showStyleCenter() }.also { gearButton = it }
         settingsGear.setOnClickListener {
             settingsGearMotion?.tap()
