@@ -2,3 +2,12 @@ build/
 .gradle/
 local.properties
 androidx-media/
+
+# Ignore APKs, check folders, and backups
+*.apk
+RajPlayer-Media3-debug-apk/
+av1-engine-check/
+__pycache__/
+*.bak
+*.bak_*
+*.backup
