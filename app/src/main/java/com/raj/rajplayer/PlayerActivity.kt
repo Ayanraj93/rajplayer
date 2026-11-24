@@ -73,6 +73,17 @@ open class PlayerActivity : Activity() {
     private lateinit var audioModePlayBtn: TextView
     private var audioModeSpeedBtn: TextView? = null
     private val audioModeSpeeds = floatArrayOf(1f, 1.5f, 2f, 2.5f, 3f, 4f, 5f)
+    private var audioModeSubTv: TextView? = null
+    private var audioModeCurTv: TextView? = null
+    private var audioModeDurTv: TextView? = null
+    private var audioModeShufBtn: TextView? = null
+    private var audioModeRepBtn: TextView? = null
+    private var audioModeArtBox: FrameLayout? = null
+    private var audioModeArtImg: android.widget.ImageView? = null
+    private var audioModeArtNote: TextView? = null
+    private var audioModeArtKey: String = ""
+    private var audioModeArtCacheKey: String = ""
+    private var audioModeArtCacheBmp: android.graphics.Bitmap? = null
     private var audioMode = false
     private var audioChildOpen = false
     private var systemBarsVisible = false
@@ -572,17 +583,119 @@ open class PlayerActivity : Activity() {
         hideBars()
     }
 
+    private fun refreshAudioModeButtons() {
+        audioModeShufBtn?.alpha = if (Prefs.shuffle(this)) 1f else 0.35f
+        val r = Prefs.repeat(this)
+        audioModeRepBtn?.text = if (r == 2) "\uD83D\uDD02" else "\uD83D\uDD01"
+        audioModeRepBtn?.alpha = if (r == 0) 0.35f else 1f
+    }
+
+    private fun updateAudioModeArtSize() {
+        val box = audioModeArtBox ?: return
+        val dm = resources.displayMetrics
+        val portrait = dm.heightPixels >= dm.widthPixels
+        val sz = if (portrait) {
+            Math.min(dm.widthPixels - dp(64), dp(340))
+        } else {
+            Math.min(dm.heightPixels / 2, dp(180))
+        }
+        val lp = box.layoutParams
+        if (lp == null || lp.width != sz || lp.height != sz) {
+            val nlp = LinearLayout.LayoutParams(sz, sz)
+            nlp.setMargins(0, dp(if (portrait) 18 else 8), 0, dp(if (portrait) 18 else 8))
+            box.layoutParams = nlp
+        }
+        audioModeArtNote?.textSize = if (portrait) 84f else 48f
+    }
+
+    private fun loadAudioModeArt() {
+        val img = audioModeArtImg ?: return
+        val note = audioModeArtNote ?: return
+        val u = Engine.items.getOrNull(Engine.idx) ?: return
+        val key = u.toString()
+        if (key == audioModeArtKey) return
+        audioModeArtKey = key
+        if (audioModeArtCacheKey == key) {
+            val cached = audioModeArtCacheBmp
+            if (cached != null && !cached.isRecycled) {
+                img.setImageBitmap(cached)
+                note.visibility = View.GONE
+                return
+            }
+        }
+        img.setImageBitmap(null)
+        note.visibility = View.VISIBLE
+        Thread {
+            var bmp: android.graphics.Bitmap? = null
+            try {
+                if (android.os.Build.VERSION.SDK_INT >= 29) {
+                    bmp = contentResolver.loadThumbnail(u, android.util.Size(360, 360), null)
+                }
+            } catch (_: Exception) { }
+            if (bmp == null) {
+                val mmr = android.media.MediaMetadataRetriever()
+                try {
+                    mmr.setDataSource(this, u)
+                    val pic = mmr.embeddedPicture
+                    if (pic != null) {
+                        bmp = android.graphics.BitmapFactory.decodeByteArray(pic, 0, pic.size)
+                    } else {
+                        bmp = mmr.getFrameAtTime(1_000_000L)
+                    }
+                } catch (_: Exception) {
+                } finally {
+                    try { mmr.release() } catch (_: Exception) { }
+                }
+            }
+            if (bmp != null) {
+                audioModeArtCacheKey = key
+                audioModeArtCacheBmp = bmp
+                val ready = bmp
+                runOnUiThread {
+                    if (audioModeArtKey == key) {
+                        img.setImageBitmap(ready)
+                        note.visibility = View.GONE
+                    }
+                }
+            }
+        }.start()
+    }
+
+    private fun showAudioModeMenu() {
+        val opts = arrayOf("Playback Speed", "Equalizer", "Audio Boost", "Sleep Timer", "Queue", "Convert to Audio", "Style Center")
+        AlertDialog.Builder(this)
+            .setTitle("Audio Options")
+            .setItems(opts) { _, which ->
+                when (which) {
+                    0 -> openSpeed()
+                    1 -> Dialogs.eq(this)
+                    2 -> Dialogs.boost(this)
+                    3 -> Dialogs.sleep(this)
+                    4 -> showAudioQueue()
+                    5 -> Hooks.convert(this, listOf(Engine.cur()), listOf(Engine.title), null)
+                    6 -> showStyleCenter()
+                }
+            }
+            .show()
+    }
+
     private fun updateAudioMode() {
         val p = Engine.mp ?: return
+        updateAudioModeArtSize()
         audioModeTitle.text = Engine.title
+        audioModeSubTv?.text = (Engine.idx + 1).toString() + " / " + Engine.items.size
         val len = p.getLength()
         val pos = p.getTime()
         if (!userSeeking && len > 0) {
             audioModeSeek.max = len.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
             audioModeSeek.progress = pos.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+            audioModeCurTv?.text = fmt(pos)
         }
+        audioModeDurTv?.text = fmt(len)
         audioModePlayBtn.text = if (p.isPlaying) "\u23F8" else "\u25B6"
         audioModeSpeedBtn?.text = rateLabel(rate)
+        refreshAudioModeButtons()
+        loadAudioModeArt()
     }
 
     private fun applyHdrWindow() {
@@ -1592,59 +1705,144 @@ open class PlayerActivity : Activity() {
         llp.setMargins(dp(20), 0, 0, 0)
         root.addView(lockBtn, llp)
 
-        // Audio Mode overlay: 0ms in-place switch on same live SurfaceView (zero black screen/stall).
+        // Audio Mode overlay: 0ms in-place switch with exact AudioActivity layout.
+        val aBg = Prefs.bg(this) or 0xFF000000.toInt()
+        val aTc = Prefs.text(this)
+        val aIc = Prefs.iconColor(this)
+        val aAc = Prefs.accent(this)
+        fun aib(sym: String, size: Float, color: Int, f: (TextView) -> Unit): TextView {
+            val t = TextView(this)
+            t.text = sym
+            t.textSize = size
+            t.setTextColor(color)
+            t.gravity = Gravity.CENTER
+            t.setPadding(dp(12), dp(8), dp(12), dp(8))
+            t.setOnClickListener { f(t) }
+            return t
+        }
+
         audioModePanel = LinearLayout(this)
         audioModePanel.orientation = LinearLayout.VERTICAL
-        audioModePanel.setPadding(dp(20), dp(14), dp(20), dp(14))
-        audioModePanel.setBackgroundColor(Prefs.bg(this) or 0xFF000000.toInt())
+        audioModePanel.gravity = Gravity.CENTER_HORIZONTAL
+        audioModePanel.setPadding(dp(20), dp(24), dp(20), dp(14))
+        audioModePanel.setBackgroundColor(aBg)
         audioModePanel.isClickable = true
         audioModePanel.isFocusable = true
         audioModePanel.elevation = dp(24).toFloat()
 
-        val audioHeader = LinearLayout(this)
-        audioHeader.gravity = Gravity.CENTER_VERTICAL
-        val backVideo = ib("\u2190  Back to Video", 17f) { returnToVideo() }
-        audioHeader.addView(backVideo, LinearLayout.LayoutParams(0, WC, 1f))
-        val settingsGear = ib("\u2699", 24f) {
+        val audioHdr = TextView(this)
+        audioHdr.text = "BACKGROUND PLAY"
+        audioHdr.textSize = 13f
+        audioHdr.setTypeface(null, android.graphics.Typeface.BOLD)
+        audioHdr.setTextColor(aTc)
+        audioHdr.alpha = 1f
+        audioHdr.setShadowLayer(4f, 0f, 1f, 0xFF000000.toInt())
+        audioHdr.gravity = Gravity.CENTER
+        audioHdr.setSingleLine(true)
+        val hdrLp = LinearLayout.LayoutParams(MP, WC)
+        hdrLp.bottomMargin = dp(4)
+        audioModePanel.addView(audioHdr, hdrLp)
+
+        val audioTop = LinearLayout(this)
+        audioTop.gravity = Gravity.CENTER_VERTICAL
+        audioTop.setPadding(dp(4), dp(2), dp(4), dp(2))
+        audioTop.addView(aib("\u2190", 24f, aIc) {
+            val i = Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            startActivity(i)
+        })
+        audioTop.addView(aib("Back to Video", 15f, aIc) { returnToVideo() })
+        audioTop.addView(View(this), LinearLayout.LayoutParams(0, 1, 1f))
+        val settingsGear = aib("\u2699", 22f, aIc) {
             audioGearMotion?.tap()
             showStyleCenter()
         }
         audioSettingsGear = settingsGear
-        audioHeader.addView(settingsGear, LinearLayout.LayoutParams(WC, WC))
-        audioModePanel.addView(audioHeader, LinearLayout.LayoutParams(MP, WC))
+        audioTop.addView(settingsGear)
+        audioTop.addView(aib("\u22EF", 24f, aIc) { showAudioModeMenu() })
+        audioTop.addView(aib("\u2715", 20f, aIc) {
+            Prefs.setAudioModeSession(this, false)
+            AudioActivity.audioModeSession = false
+            audioMode = false
+            Engine.stopAll(this)
+            finish()
+        })
+        audioModePanel.addView(audioTop, LinearLayout.LayoutParams(MP, WC))
 
         val audioScroll = android.widget.ScrollView(this).apply {
             isFillViewport = true
             isVerticalScrollBarEnabled = false
         }
-        val audioBody = LinearLayout(this).apply {
+        val audioCol = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            gravity = Gravity.CENTER
-            setPadding(dp(8), dp(6), dp(8), dp(10))
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(4), 0, dp(4), dp(8))
         }
 
-        val audioIcon = TextView(this)
-        audioIcon.text = "\uD83C\uDFA7"
-        audioIcon.textSize = 54f
-        audioIcon.gravity = Gravity.CENTER
-        audioIcon.setTextColor(Color.WHITE)
-        val iconLp = LinearLayout.LayoutParams(MP, WC)
-        iconLp.setMargins(0, dp(10), 0, dp(10))
-        audioBody.addView(audioIcon, iconLp)
+        // ---- album art (exact AudioActivity rounded card) ----
+        val artSize = Math.min(resources.displayMetrics.widthPixels - dp(64), dp(340))
+        val artBox = FrameLayout(this)
+        val artGrad = GradientDrawable(GradientDrawable.Orientation.TL_BR, intArrayOf(aAc, 0xFF000000.toInt()))
+        artBox.background = artGrad
+        artBox.outlineProvider = object : android.view.ViewOutlineProvider() {
+            override fun getOutline(v: View, o: android.graphics.Outline) {
+                o.setRoundRect(0, 0, v.width, v.height, dp(24).toFloat())
+            }
+        }
+        artBox.clipToOutline = true
+        val artNote = TextView(this)
+        artNote.text = "\uD83C\uDFB5"
+        artNote.textSize = 84f
+        artNote.gravity = Gravity.CENTER
+        artBox.addView(artNote, FrameLayout.LayoutParams(MP, MP))
+        val artImg = android.widget.ImageView(this)
+        artImg.scaleType = android.widget.ImageView.ScaleType.CENTER_CROP
+        artBox.addView(artImg, FrameLayout.LayoutParams(MP, MP))
+        audioModeArtBox = artBox
+        audioModeArtNote = artNote
+        audioModeArtImg = artImg
+        val alp = LinearLayout.LayoutParams(artSize, artSize)
+        alp.setMargins(0, dp(18), 0, dp(18))
+        audioCol.addView(artBox, alp)
 
+        // ---- title & subtitle ----
         audioModeTitle = TextView(this)
-        audioModeTitle.textSize = 18f
-        audioModeTitle.setTextColor(Color.WHITE)
+        audioModeTitle.textSize = 20f
+        audioModeTitle.setTextColor(aTc)
         audioModeTitle.gravity = Gravity.CENTER
         audioModeTitle.maxLines = 2
         audioModeTitle.ellipsize = TextUtils.TruncateAt.END
-        audioBody.addView(audioModeTitle, LinearLayout.LayoutParams(MP, WC))
+        audioModeTitle.setTypeface(null, android.graphics.Typeface.BOLD)
+        audioCol.addView(audioModeTitle, LinearLayout.LayoutParams(MP, WC))
 
+        val subTv = TextView(this)
+        subTv.textSize = 13f
+        subTv.setTextColor((aTc and 0x00FFFFFF) or 0x99000000.toInt())
+        subTv.gravity = Gravity.CENTER
+        subTv.setPadding(0, dp(4), 0, dp(12))
+        audioModeSubTv = subTv
+        audioCol.addView(subTv, LinearLayout.LayoutParams(MP, WC))
+
+        // ---- seek row (curTv + SeekBar + durTv) ----
+        val aSeekRow = LinearLayout(this)
+        aSeekRow.gravity = Gravity.CENTER_VERTICAL
+        val aCurTv = TextView(this)
+        aCurTv.setTextColor(aTc)
+        aCurTv.textSize = 12f
+        aCurTv.text = "0:00"
+        val aDurTv = TextView(this)
+        aDurTv.setTextColor(aTc)
+        aDurTv.textSize = 12f
+        aDurTv.text = "0:00"
+        audioModeCurTv = aCurTv
+        audioModeDurTv = aDurTv
         audioModeSeek = SeekBar(this)
-        audioModeSeek.progressTintList = ColorStateList.valueOf(ac)
-        audioModeSeek.thumbTintList = ColorStateList.valueOf(ac)
+        audioModeSeek.progressTintList = ColorStateList.valueOf(aAc)
+        audioModeSeek.thumbTintList = ColorStateList.valueOf(aAc)
         audioModeSeek.setOnSeekBarChangeListener(object : SeekBar.OnSeekBarChangeListener {
-            override fun onProgressChanged(b: SeekBar?, progress: Int, fromUser: Boolean) {}
+            override fun onProgressChanged(b: SeekBar?, progress: Int, fromUser: Boolean) {
+                if (fromUser) aCurTv.text = fmt(progress.toLong())
+            }
             override fun onStartTrackingTouch(b: SeekBar?) {
                 userSeeking = true
             }
@@ -1654,40 +1852,57 @@ open class PlayerActivity : Activity() {
                 updateAudioMode()
             }
         })
-        val seekLp = LinearLayout.LayoutParams(MP, WC)
-        seekLp.setMargins(0, dp(14), 0, dp(8))
-        audioBody.addView(audioModeSeek, seekLp)
+        aSeekRow.addView(aCurTv)
+        aSeekRow.addView(audioModeSeek, LinearLayout.LayoutParams(0, WC, 1f))
+        aSeekRow.addView(aDurTv)
+        audioCol.addView(aSeekRow, LinearLayout.LayoutParams(MP, WC))
 
+        // ---- transport row (Shuffle + Prev + Play Circle + Next + Repeat) ----
         val transport = LinearLayout(this)
         transport.gravity = Gravity.CENTER
-        transport.addView(ib("\u23EE", 27f) { Engine.prev(this) })
-        audioModePlayBtn = ib("\u23F8", 32f) { Engine.toggle(this) }
-        val audioPlayLp = LinearLayout.LayoutParams(dp(68), dp(68))
-        audioPlayLp.gravity = Gravity.CENTER
-        audioPlayLp.setMargins(dp(16), dp(6), dp(16), dp(6))
+        val aShuf = aib("\uD83D\uDD00", 22f, aIc) {
+            Prefs.setShuffle(this, !Prefs.shuffle(this))
+            refreshAudioModeButtons()
+        }
+        val aRep = aib("\uD83D\uDD01", 22f, aIc) {
+            Prefs.setRepeat(this, (Prefs.repeat(this) + 1) % 3)
+            refreshAudioModeButtons()
+        }
+        audioModeShufBtn = aShuf
+        audioModeRepBtn = aRep
+        transport.addView(aShuf)
+        transport.addView(aib("\u23EE", 30f, aIc) { Engine.prev(this) })
+        audioModePlayBtn = aib("\u23F8", 30f, contrast(aAc)) { Engine.toggle(this) }
         val playCircle = GradientDrawable()
         playCircle.shape = GradientDrawable.OVAL
-        playCircle.setColor(ac)
+        playCircle.setColor(aAc)
         audioModePlayBtn.background = playCircle
+        val audioPlayLp = LinearLayout.LayoutParams(dp(72), dp(72))
+        audioPlayLp.setMargins(dp(12), 0, dp(12), 0)
         transport.addView(audioModePlayBtn, audioPlayLp)
-        transport.addView(ib("\u23ED", 27f) { Engine.next(this) })
-        audioBody.addView(transport, LinearLayout.LayoutParams(MP, WC))
+        transport.addView(aib("\u23ED", 30f, aIc) { Engine.next(this) })
+        transport.addView(aRep)
+        audioCol.addView(transport, LinearLayout.LayoutParams(MP, WC))
 
+        // ---- seek step row (-10s / +10s) ----
         val skipRow = LinearLayout(this)
         skipRow.gravity = Gravity.CENTER
-        skipRow.addView(ib("-" + Prefs.seekSec(this) + "s", 14f) {
+        skipRow.setPadding(0, dp(4), 0, dp(4))
+        skipRow.addView(aib("-" + Prefs.seekSec(this) + "s", 14f, aIc) {
             val now = Engine.mp?.getTime() ?: 0L
             Engine.seekTo((now - Prefs.seekSec(this) * 1000L).coerceAtLeast(0L))
         })
-        skipRow.addView(ib("+" + Prefs.seekSec(this) + "s", 14f) {
+        skipRow.addView(aib("+" + Prefs.seekSec(this) + "s", 14f, aIc) {
             val now = Engine.mp?.getTime() ?: 0L
             Engine.seekTo(now + Prefs.seekSec(this) * 1000L)
         })
-        audioBody.addView(skipRow, LinearLayout.LayoutParams(MP, WC))
+        audioCol.addView(skipRow, LinearLayout.LayoutParams(MP, WC))
 
-        val actionRow = LinearLayout(this)
-        actionRow.gravity = Gravity.CENTER
-        val aSpeed = ib(rateLabel(rate), 13f) {
+        // ---- extras row (Speed + EQ + Boost + Sleep + Queue) ----
+        val exRowAudio = LinearLayout(this)
+        exRowAudio.gravity = Gravity.CENTER
+        exRowAudio.setPadding(0, dp(10), 0, 0)
+        val aSpeed = aib(rateLabel(rate), 14f, aIc) {
             val nextIdx = audioModeSpeeds.indexOfFirst { it > rate + 0.02f }
             val next = if (nextIdx >= 0) audioModeSpeeds[nextIdx] else audioModeSpeeds[0]
             setRateTo(next)
@@ -1698,22 +1913,24 @@ open class PlayerActivity : Activity() {
             true
         }
         audioModeSpeedBtn = aSpeed
-        actionRow.addView(aSpeed)
-        actionRow.addView(ib("EQ", 13f) { Dialogs.eq(this) })
-        actionRow.addView(ib("Boost", 13f) { Dialogs.boost(this) })
-        actionRow.addView(ib("Sleep", 13f) { Dialogs.sleep(this) })
-        actionRow.addView(ib("Queue", 13f) { showAudioQueue() })
-        audioBody.addView(actionRow, LinearLayout.LayoutParams(MP, WC))
+        exRowAudio.addView(aSpeed)
+        exRowAudio.addView(aib("EQ", 14f, aIc) { Dialogs.eq(this) })
+        exRowAudio.addView(aib("Boost", 14f, aIc) { Dialogs.boost(this) })
+        exRowAudio.addView(aib("Sleep", 14f, aIc) { Dialogs.sleep(this) })
+        exRowAudio.addView(aib("Queue", 14f, aIc) { showAudioQueue() })
+        audioCol.addView(exRowAudio, LinearLayout.LayoutParams(MP, WC))
 
+        // ---- action row (Convert to Audio + Style Center) ----
         val featureRow = LinearLayout(this)
         featureRow.gravity = Gravity.CENTER
-        featureRow.addView(ib("Convert to Audio", 13f) {
+        featureRow.setPadding(0, dp(8), 0, 0)
+        featureRow.addView(aib("Convert to Audio", 14f, aIc) {
             Hooks.convert(this, listOf(Engine.cur()), listOf(Engine.title), null)
         })
-        featureRow.addView(ib("Style Center", 13f) { showStyleCenter() })
-        audioBody.addView(featureRow, LinearLayout.LayoutParams(MP, WC))
+        featureRow.addView(aib("Style Center", 14f, aIc) { showStyleCenter() })
+        audioCol.addView(featureRow, LinearLayout.LayoutParams(MP, WC))
 
-        audioScroll.addView(audioBody, FrameLayout.LayoutParams(MP, WC))
+        audioScroll.addView(audioCol, FrameLayout.LayoutParams(MP, WC))
         audioModePanel.addView(audioScroll, LinearLayout.LayoutParams(MP, 0, 1f))
 
         audioModePanel.visibility = View.GONE

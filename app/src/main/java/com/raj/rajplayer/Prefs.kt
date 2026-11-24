@@ -36,17 +36,19 @@ object Theme {
             }
             Prefs.K_ACCENT -> accent
             Prefs.K_TEXT, Prefs.K_ATEXT -> when (mode) {
-                "dark", "light" -> Color.parseColor("#111111")
+                "dark" -> Color.parseColor("#FFFFFF")
+                "light" -> Color.parseColor("#111111")
                 else -> Color.parseColor("#69F0AE")
             }
             Prefs.K_VBAR -> Color.parseColor("#99000000")
-            Prefs.K_VTEXT -> if (mode == "dark") Color.parseColor("#111111") else Color.parseColor("#69F0AE")
+            Prefs.K_VTEXT -> if (mode == "dark") Color.parseColor("#FFFFFF") else Color.parseColor("#69F0AE")
             Prefs.K_ABAR -> (accent and 0x00FFFFFF) or 0x33000000
             Prefs.K_ICON -> when (mode) {
-                "dark", "light" -> Color.parseColor("#111111")
+                "dark" -> Color.parseColor("#FFFFFF")
+                "light" -> Color.parseColor("#111111")
                 else -> Color.parseColor("#69F0AE")
             }
-            else -> if (mode == "dark") Color.parseColor("#111111") else Color.parseColor("#69F0AE")
+            else -> if (mode == "dark") Color.parseColor("#FFFFFF") else Color.parseColor("#69F0AE")
         }
     }
 }
