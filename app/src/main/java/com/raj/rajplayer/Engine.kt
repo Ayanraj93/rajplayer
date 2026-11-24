@@ -146,9 +146,9 @@ object Engine {
                 enableAudioOutputPlaybackParams: Boolean
             ): androidx.media3.exoplayer.audio.AudioSink {
                 val bufferProvider = androidx.media3.exoplayer.audio.DefaultAudioTrackBufferSizeProvider.Builder()
-                    .setMinPcmBufferDurationUs(450_000)
-                    .setMaxPcmBufferDurationUs(900_000)
-                    .setPcmBufferMultiplicationFactor(4)
+                    .setMinPcmBufferDurationUs(800_000)
+                    .setMaxPcmBufferDurationUs(1_500_000)
+                    .setPcmBufferMultiplicationFactor(8)
                     .build()
                 return androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(enableFloatOutput)

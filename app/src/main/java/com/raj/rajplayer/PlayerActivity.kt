@@ -85,6 +85,7 @@ open class PlayerActivity : Activity() {
     private var audioModeArtCacheKey: String = ""
     private var audioModeArtCacheBmp: android.graphics.Bitmap? = null
     private var audioMode = false
+    private var savedOrientationBeforeAudio: Int = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
     private var audioChildOpen = false
     private var systemBarsVisible = false
     private var controlAnimsRunning = false
@@ -406,6 +407,12 @@ open class PlayerActivity : Activity() {
 
     override fun onConfigurationChanged(newConfig: Configuration) {
         super.onConfigurationChanged(newConfig)
+        if (audioMode) {
+            if (resources.configuration.orientation != android.content.res.Configuration.ORIENTATION_PORTRAIT) {
+                requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            }
+            audioModePanel.post { updateAudioModeArtSize() }
+        }
         updateResumeBarPosition()
         resetZoom()
         hideBars()
@@ -549,6 +556,7 @@ open class PlayerActivity : Activity() {
 
     private fun enterAudioMode() {
         if (audioMode || !Engine.active) return
+        savedOrientationBeforeAudio = requestedOrientation
         audioMode = true
         audioChildOpen = false
         Engine.modeSwitching = false
@@ -561,6 +569,10 @@ open class PlayerActivity : Activity() {
         updateAudioMode()
         audioModePanel.visibility = View.VISIBLE
         audioModePanel.bringToFront()
+        if (requestedOrientation != android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT) {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+        }
+        audioModePanel.post { updateAudioModeArtSize() }
         if (Engine.isPlaying()) PlaybackService.start(this)
     }
 
@@ -578,6 +590,15 @@ open class PlayerActivity : Activity() {
         touchView.visibility = View.VISIBLE
         atomic?.visibility = View.VISIBLE
         atomic?.setPaused(rate > 2f)
+        val targetOri = savedOrientationBeforeAudio
+        savedOrientationBeforeAudio = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        if (targetOri != android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED) {
+            requestedOrientation = targetOri
+        } else if (Engine.items.isNotEmpty() && Prefs.autoOrient(this)) {
+            Orient.setFor(this, Engine.cur()) { videoPortrait = it }
+        } else {
+            requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_UNSPECIFIED
+        }
         syncSpeedFromEngine()
         showControls()
         hideBars()
@@ -872,7 +893,7 @@ open class PlayerActivity : Activity() {
         abB = -1L
         lastDropCountSeen = Engine.droppedFrames
         Prefs.setLastPlayedUri(this, cu.toString())
-        if (Prefs.autoOrient(this)) Orient.setFor(this, cu) { videoPortrait = it }
+        if (!audioMode && Prefs.autoOrient(this)) Orient.setFor(this, cu) { videoPortrait = it }
         resetZoom()
         resumeBarRef?.let { bar ->
             hideResumeBannerRef?.let { ui.removeCallbacks(it) }
@@ -2053,7 +2074,12 @@ open class PlayerActivity : Activity() {
         super.onResume()
         Engine.playerForeground = true
         Engine.modeSwitching = false
-        if (!audioMode) {
+        if (audioMode) {
+            if (requestedOrientation != android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT) {
+                requestedOrientation = android.content.pm.ActivityInfo.SCREEN_ORIENTATION_PORTRAIT
+            }
+            audioModePanel.post { updateAudioModeArtSize() }
+        } else {
             Prefs.setAudioModeSession(this, false)
             AudioActivity.audioModeSession = false
             Bg.restoreVideo()
@@ -2084,7 +2110,7 @@ open class PlayerActivity : Activity() {
     }
 
     override fun onStop() {
-        if (!isInPictureInPictureMode) Engine.mp?.pauseSurface()
+        if (!isInPictureInPictureMode && !isChangingConfigurations) Engine.mp?.pauseSurface()
         super.onStop()
         val allowVideoBg = Prefs.videoBgPlay(this)
         val switchingToAudio = audioMode || audioChildOpen || AudioActivity.audioModeSession ||
