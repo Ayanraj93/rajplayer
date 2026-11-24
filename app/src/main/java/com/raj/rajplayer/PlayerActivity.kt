@@ -520,6 +520,7 @@ open class PlayerActivity : Activity() {
         super.onRestart()
         if (!audioMode && Engine.active) {
             Bg.restoreVideo()
+            Engine.mp?.resumeSurface()
         }
     }
 
@@ -1797,6 +1798,13 @@ open class PlayerActivity : Activity() {
                 syncSpeedFromEngine()
                 showControls()
             }
+        }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        if (!audioMode && Engine.active) {
+            Engine.mp?.resumeSurface()
         }
     }
 

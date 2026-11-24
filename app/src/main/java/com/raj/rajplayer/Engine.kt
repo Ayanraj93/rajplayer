@@ -108,8 +108,8 @@ object Engine {
             .setBufferDurationsMs(
                 if (lowMem) 20000 else 30000,
                 if (lowMem) 40000 else 60000,
-                500,
-                1500
+                100,
+                250
             )
             .setTargetBufferBytes(if (lowMem) 20 * 1024 * 1024 else 48 * 1024 * 1024)
             .setBackBuffer(if (lowMem) 3000 else 5000, false)
@@ -146,9 +146,9 @@ object Engine {
                 enableAudioOutputPlaybackParams: Boolean
             ): androidx.media3.exoplayer.audio.AudioSink {
                 val bufferProvider = androidx.media3.exoplayer.audio.DefaultAudioTrackBufferSizeProvider.Builder()
-                    .setMinPcmBufferDurationUs(600_000)
-                    .setMaxPcmBufferDurationUs(1_200_000)
-                    .setPcmBufferMultiplicationFactor(8)
+                    .setMinPcmBufferDurationUs(450_000)
+                    .setMaxPcmBufferDurationUs(900_000)
+                    .setPcmBufferMultiplicationFactor(4)
                     .build()
                 return androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context)
                     .setEnableFloatOutput(enableFloatOutput)
@@ -172,6 +172,7 @@ object Engine {
             .setAudioAttributes(mediaAudioAttrs, false)
             .setWakeMode(androidx.media3.common.C.WAKE_MODE_LOCAL)
             .setHandleAudioBecomingNoisy(false)
+            .setDetachSurfaceTimeoutMs(300L)
             .build()
         exo.setPriority(androidx.media3.common.C.PRIORITY_PLAYBACK)
         exo.setPlaybackParameters(PlaybackParameters(1f, 1f))
@@ -222,7 +223,7 @@ object Engine {
                     if (playerForeground) {
                         main.postDelayed({
                             if (playerForeground && active) mp?.resumeSurface()
-                        }, 60L)
+                        }, 16L)
                     }
                     notifyChanged()
                     return

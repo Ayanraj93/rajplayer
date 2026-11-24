@@ -41,6 +41,7 @@ class MediaPlayer(val player: ExoPlayer) {
     private var boundSurface: android.view.Surface? = null
     @Volatile private var surfacePaused: Boolean = false
     @Volatile private var hasAttachedOutput: Boolean = false
+    @Volatile private var surfaceReady: Boolean = false
 
     init {
         player.addListener(object : androidx.media3.common.Player.Listener {
@@ -122,7 +123,7 @@ class MediaPlayer(val player: ExoPlayer) {
     private fun bindSurfaceIfValid(sv: SurfaceView) {
         val holder = sv.holder
         val s = holder.surface
-        if (!surfacePaused && s != null && s.isValid) {
+        if (!surfacePaused && surfaceReady && s != null && s.isValid) {
             if (boundSurface !== s) {
                 boundSurface = s
                 hasAttachedOutput = true
@@ -203,6 +204,7 @@ class MediaPlayer(val player: ExoPlayer) {
 
             val cb = object : android.view.SurfaceHolder.Callback {
                 override fun surfaceCreated(holder: android.view.SurfaceHolder) {
+                    surfaceReady = true
                     surface?.let { bindSurfaceIfValid(it) }
                 }
                 override fun surfaceChanged(
@@ -211,6 +213,7 @@ class MediaPlayer(val player: ExoPlayer) {
                     width: Int,
                     height: Int
                 ) {
+                    if (width > 0 && height > 0) surfaceReady = true
                     if (boundSurface === holder.surface) {
                         adjustSurface()
                     } else {
@@ -218,6 +221,7 @@ class MediaPlayer(val player: ExoPlayer) {
                     }
                 }
                 override fun surfaceDestroyed(holder: android.view.SurfaceHolder) {
+                    surfaceReady = false
                     if (boundSurface === holder.surface) {
                         boundSurface = null
                         if (hasAttachedOutput) {
@@ -243,6 +247,7 @@ class MediaPlayer(val player: ExoPlayer) {
 
     fun detachViews() {
         surfacePaused = true
+        surfaceReady = false
         boundSurface = null
         try {
             surfaceCallback?.let { cb ->

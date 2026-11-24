@@ -467,6 +467,13 @@ class AudioActivity : Activity() {
             Engine.mp?.setRate(next)
             b.text = rateLabel(next)
         }
+        speedBtn.setOnLongClickListener {
+            speedIdx = 0
+            Engine.mp?.setRate(1f)
+            speedBtn.text = "1x"
+            android.widget.Toast.makeText(this, "Speed 1x", android.widget.Toast.LENGTH_SHORT).show()
+            true
+        }
         ex.addView(speedBtn)
         ex.addView(ib("EQ", 14f, ic) { Dialogs.eq(this) })
         ex.addView(ib("Boost", 14f, ic) { Dialogs.boost(this) })
