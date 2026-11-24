@@ -71,6 +71,8 @@ open class PlayerActivity : Activity() {
     private lateinit var audioModeTitle: TextView
     private lateinit var audioModeSeek: SeekBar
     private lateinit var audioModePlayBtn: TextView
+    private var audioModeSpeedBtn: TextView? = null
+    private val audioModeSpeeds = floatArrayOf(1f, 1.5f, 2f, 2.5f, 3f, 4f, 5f)
     private var audioMode = false
     private var audioChildOpen = false
     private var systemBarsVisible = false
@@ -206,6 +208,7 @@ open class PlayerActivity : Activity() {
                     lastDropCountSeen = dropsNow
                 }
             }
+            if (audioMode) updateAudioMode()
             ui.postDelayed(this, if (rate > 2f) 800L else 500L)
         }
     }
@@ -534,42 +537,37 @@ open class PlayerActivity : Activity() {
     private var lastModeSwitchAt = 0L
 
     private fun enterAudioMode() {
-        val now = android.os.SystemClock.elapsedRealtime()
-        if (audioChildOpen || !Engine.active || now - lastModeSwitchAt < 350L) return
-        lastModeSwitchAt = now
-        audioChildOpen = true
-        Engine.modeSwitching = true
+        if (audioMode || !Engine.active) return
+        audioMode = true
+        audioChildOpen = false
+        Engine.modeSwitching = false
         AudioActivity.audioModeSession = true
         Prefs.setAudioModeSession(this, true)
         ui.removeCallbacks(hideRun)
-        Engine.mp?.pauseSurface()
-        try {
-            val i = Intent(this, AudioActivity::class.java)
-                .putExtra("cont", true)
-                .putExtra("fromVideo", true)
-                .addFlags(
-                    Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP or
-                    Intent.FLAG_ACTIVITY_NO_ANIMATION
-                )
-            startActivity(i)
-            @Suppress("DEPRECATION")
-            overridePendingTransition(0, 0)
-        } catch (e: Exception) {
-            audioChildOpen = false
-            Engine.modeSwitching = false
-            Toast.makeText(this, "Audio Player open nahi hua: ${e.message}", Toast.LENGTH_LONG).show()
-        }
+        resumeBarRef?.visibility = View.GONE
+        atomic?.setPaused(true)
+        syncSpeedFromEngine()
+        updateAudioMode()
+        audioModePanel.visibility = View.VISIBLE
+        audioModePanel.bringToFront()
+        if (Engine.isPlaying()) PlaybackService.start(this)
     }
 
     private fun returnToVideo() {
         if (!audioMode) return
         audioMode = false
+        audioChildOpen = false
+        Engine.modeSwitching = false
+        AudioActivity.audioModeSession = false
+        Prefs.setAudioModeSession(this, false)
+        Bg.restoreVideo()
+        Engine.mp?.resumeSurface()
         audioModePanel.visibility = View.GONE
         layout.visibility = View.VISIBLE
         touchView.visibility = View.VISIBLE
         atomic?.visibility = View.VISIBLE
-        attachVideo()
+        atomic?.setPaused(rate > 2f)
+        syncSpeedFromEngine()
         showControls()
         hideBars()
     }
@@ -584,6 +582,7 @@ open class PlayerActivity : Activity() {
             audioModeSeek.progress = pos.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
         }
         audioModePlayBtn.text = if (p.isPlaying) "\u23F8" else "\u25B6"
+        audioModeSpeedBtn?.text = rateLabel(rate)
     }
 
     private fun applyHdrWindow() {
@@ -639,6 +638,7 @@ open class PlayerActivity : Activity() {
         }
         atomic?.setPaused(rate > 2f)
         speedBtn.text = rateLabel(rate)
+        audioModeSpeedBtn?.text = rateLabel(rate)
     }
 
     private fun syncSpeedFromEngine() {
@@ -646,6 +646,7 @@ open class PlayerActivity : Activity() {
         rate = Math.round(cur.coerceIn(0.25f, 5f) * 20f) / 20f
         atomic?.setPaused(rate > 2f)
         if (::speedBtn.isInitialized) speedBtn.text = rateLabel(rate)
+        audioModeSpeedBtn?.text = rateLabel(rate)
     }
 
     private fun setRateTo(r: Float) {
@@ -1083,7 +1084,7 @@ open class PlayerActivity : Activity() {
     }
 
     private fun recreateAudioModeStyle() {
-        audioModePanel.setBackgroundColor(Prefs.bg(this))
+        audioModePanel.setBackgroundColor(Prefs.bg(this) or 0xFF000000.toInt())
         val c = Prefs.accent(this)
         audioModeSeek.progressTintList = ColorStateList.valueOf(c)
         audioModeSeek.thumbTintList = ColorStateList.valueOf(c)
@@ -1591,35 +1592,53 @@ open class PlayerActivity : Activity() {
         llp.setMargins(dp(20), 0, 0, 0)
         root.addView(lockBtn, llp)
 
-        // Audio Mode overlay: same Media3 session, no reload or seek reset.
+        // Audio Mode overlay: 0ms in-place switch on same live SurfaceView (zero black screen/stall).
         audioModePanel = LinearLayout(this)
         audioModePanel.orientation = LinearLayout.VERTICAL
-        audioModePanel.gravity = Gravity.CENTER
-        audioModePanel.setPadding(dp(28), dp(24), dp(28), dp(24))
-        audioModePanel.setBackgroundColor(0xFF10131B.toInt())
+        audioModePanel.setPadding(dp(20), dp(14), dp(20), dp(14))
+        audioModePanel.setBackgroundColor(Prefs.bg(this) or 0xFF000000.toInt())
+        audioModePanel.isClickable = true
+        audioModePanel.isFocusable = true
+        audioModePanel.elevation = dp(24).toFloat()
 
         val audioHeader = LinearLayout(this)
         audioHeader.gravity = Gravity.CENTER_VERTICAL
         val backVideo = ib("\u2190  Back to Video", 17f) { returnToVideo() }
         audioHeader.addView(backVideo, LinearLayout.LayoutParams(0, WC, 1f))
+        val settingsGear = ib("\u2699", 24f) {
+            audioGearMotion?.tap()
+            showStyleCenter()
+        }
+        audioSettingsGear = settingsGear
+        audioHeader.addView(settingsGear, LinearLayout.LayoutParams(WC, WC))
         audioModePanel.addView(audioHeader, LinearLayout.LayoutParams(MP, WC))
+
+        val audioScroll = android.widget.ScrollView(this).apply {
+            isFillViewport = true
+            isVerticalScrollBarEnabled = false
+        }
+        val audioBody = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            setPadding(dp(8), dp(6), dp(8), dp(10))
+        }
 
         val audioIcon = TextView(this)
         audioIcon.text = "\uD83C\uDFA7"
-        audioIcon.textSize = 76f
+        audioIcon.textSize = 54f
         audioIcon.gravity = Gravity.CENTER
         audioIcon.setTextColor(Color.WHITE)
         val iconLp = LinearLayout.LayoutParams(MP, WC)
-        iconLp.setMargins(0, dp(55), 0, dp(28))
-        audioModePanel.addView(audioIcon, iconLp)
+        iconLp.setMargins(0, dp(10), 0, dp(10))
+        audioBody.addView(audioIcon, iconLp)
 
         audioModeTitle = TextView(this)
-        audioModeTitle.textSize = 20f
+        audioModeTitle.textSize = 18f
         audioModeTitle.setTextColor(Color.WHITE)
         audioModeTitle.gravity = Gravity.CENTER
         audioModeTitle.maxLines = 2
         audioModeTitle.ellipsize = TextUtils.TruncateAt.END
-        audioModePanel.addView(audioModeTitle, LinearLayout.LayoutParams(MP, WC))
+        audioBody.addView(audioModeTitle, LinearLayout.LayoutParams(MP, WC))
 
         audioModeSeek = SeekBar(this)
         audioModeSeek.progressTintList = ColorStateList.valueOf(ac)
@@ -1636,23 +1655,23 @@ open class PlayerActivity : Activity() {
             }
         })
         val seekLp = LinearLayout.LayoutParams(MP, WC)
-        seekLp.setMargins(0, dp(28), 0, dp(12))
-        audioModePanel.addView(audioModeSeek, seekLp)
+        seekLp.setMargins(0, dp(14), 0, dp(8))
+        audioBody.addView(audioModeSeek, seekLp)
 
         val transport = LinearLayout(this)
         transport.gravity = Gravity.CENTER
         transport.addView(ib("\u23EE", 27f) { Engine.prev(this) })
-        audioModePlayBtn = ib("\u23F8", 34f) { Engine.toggle(this) }
-        val audioPlayLp = LinearLayout.LayoutParams(dp(76), dp(76))
+        audioModePlayBtn = ib("\u23F8", 32f) { Engine.toggle(this) }
+        val audioPlayLp = LinearLayout.LayoutParams(dp(68), dp(68))
         audioPlayLp.gravity = Gravity.CENTER
-        audioPlayLp.setMargins(dp(16), dp(10), dp(16), dp(10))
+        audioPlayLp.setMargins(dp(16), dp(6), dp(16), dp(6))
         val playCircle = GradientDrawable()
         playCircle.shape = GradientDrawable.OVAL
         playCircle.setColor(ac)
         audioModePlayBtn.background = playCircle
         transport.addView(audioModePlayBtn, audioPlayLp)
         transport.addView(ib("\u23ED", 27f) { Engine.next(this) })
-        audioModePanel.addView(transport, LinearLayout.LayoutParams(MP, WC))
+        audioBody.addView(transport, LinearLayout.LayoutParams(MP, WC))
 
         val skipRow = LinearLayout(this)
         skipRow.gravity = Gravity.CENTER
@@ -1664,15 +1683,27 @@ open class PlayerActivity : Activity() {
             val now = Engine.mp?.getTime() ?: 0L
             Engine.seekTo(now + Prefs.seekSec(this) * 1000L)
         })
-        audioModePanel.addView(skipRow, LinearLayout.LayoutParams(MP, WC))
+        audioBody.addView(skipRow, LinearLayout.LayoutParams(MP, WC))
 
         val actionRow = LinearLayout(this)
         actionRow.gravity = Gravity.CENTER
+        val aSpeed = ib(rateLabel(rate), 13f) {
+            val nextIdx = audioModeSpeeds.indexOfFirst { it > rate + 0.02f }
+            val next = if (nextIdx >= 0) audioModeSpeeds[nextIdx] else audioModeSpeeds[0]
+            setRateTo(next)
+        }
+        aSpeed.setOnLongClickListener {
+            setRateTo(1f)
+            Toast.makeText(this, "Speed 1x", Toast.LENGTH_SHORT).show()
+            true
+        }
+        audioModeSpeedBtn = aSpeed
+        actionRow.addView(aSpeed)
         actionRow.addView(ib("EQ", 13f) { Dialogs.eq(this) })
         actionRow.addView(ib("Boost", 13f) { Dialogs.boost(this) })
         actionRow.addView(ib("Sleep", 13f) { Dialogs.sleep(this) })
         actionRow.addView(ib("Queue", 13f) { showAudioQueue() })
-        audioModePanel.addView(actionRow, LinearLayout.LayoutParams(MP, WC))
+        audioBody.addView(actionRow, LinearLayout.LayoutParams(MP, WC))
 
         val featureRow = LinearLayout(this)
         featureRow.gravity = Gravity.CENTER
@@ -1680,17 +1711,10 @@ open class PlayerActivity : Activity() {
             Hooks.convert(this, listOf(Engine.cur()), listOf(Engine.title), null)
         })
         featureRow.addView(ib("Style Center", 13f) { showStyleCenter() })
-        audioModePanel.addView(featureRow, LinearLayout.LayoutParams(MP, WC))
+        audioBody.addView(featureRow, LinearLayout.LayoutParams(MP, WC))
 
-        val settingsGear = ib("\u2699", 24f) { showStyleCenter() }
-        audioSettingsGear = settingsGear
-        audioModePanel.addView(settingsGear, LinearLayout.LayoutParams(WC, WC).apply {
-            gravity = Gravity.END
-        })
-        settingsGear.setOnClickListener {
-            audioGearMotion?.tap()
-            showStyleCenter()
-        }
+        audioScroll.addView(audioBody, FrameLayout.LayoutParams(MP, WC))
+        audioModePanel.addView(audioScroll, LinearLayout.LayoutParams(MP, 0, 1f))
 
         audioModePanel.visibility = View.GONE
         root.addView(audioModePanel, FrameLayout.LayoutParams(MP, MP))
