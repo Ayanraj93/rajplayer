@@ -106,8 +106,8 @@ class MainActivity : Activity() {
     }
 
     private val ui = Handler(Looper.getMainLooper())
-    private val cache = LruCache<String, Bitmap>(120)
-    private val pool = Executors.newFixedThreadPool(3)
+    private val cache = LruCache<String, Bitmap>(240)
+    private val pool = Executors.newFixedThreadPool(4)
     private val loader = Executors.newSingleThreadExecutor()
 
     private val palette = listOf(
@@ -182,7 +182,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
-        permissionGrantedAtPause = hasPerm()
+        permissionGrantedAtPause = hasFullMediaPerm()
         stopSettingsGearAnimation()
         super.onPause()
         ui.removeCallbacks(miniTick)
@@ -293,9 +293,12 @@ class MainActivity : Activity() {
         if (Build.VERSION.SDK_INT >= 33) Manifest.permission.READ_MEDIA_AUDIO
         else Manifest.permission.READ_EXTERNAL_STORAGE
 
-    private fun hasPerm() =
-        checkSelfPermission(perm()) == PackageManager.PERMISSION_GRANTED ||
-                checkSelfPermission(audioPerm()) == PackageManager.PERMISSION_GRANTED
+    private fun hasVideoPerm() = checkSelfPermission(perm()) == PackageManager.PERMISSION_GRANTED
+    private fun hasAudioPerm() = checkSelfPermission(audioPerm()) == PackageManager.PERMISSION_GRANTED
+    private fun hasLimitedVisualPerm() = Build.VERSION.SDK_INT >= 34 &&
+        checkSelfPermission("android.permission.READ_MEDIA_VISUAL_USER_SELECTED") == PackageManager.PERMISSION_GRANTED
+    private fun hasFullMediaPerm() = hasVideoPerm() && hasAudioPerm()
+    private fun hasPerm() = hasVideoPerm() || hasAudioPerm() || hasLimitedVisualPerm()
 
     private fun reqPerms() {
         val l = ArrayList<String>()
@@ -476,7 +479,7 @@ class MainActivity : Activity() {
 
     // ================= media load (background thread) =================
     private fun queryMedia(video: Boolean): List<V> {
-        val base = if (video) MediaStore.Video.Media.EXTERNAL_CONTENT_URI else MediaStore.Audio.Media.EXTERNAL_CONTENT_URI
+        val base = if (video) MediaStore.Video.Media.getContentUri(MediaStore.VOLUME_EXTERNAL) else MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL)
         val proj = if (video) arrayOf(
             MediaStore.MediaColumns._ID,
             MediaStore.MediaColumns.DISPLAY_NAME,
@@ -1002,6 +1005,7 @@ class MainActivity : Activity() {
 
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
+        if ((tab == 0 || tab == 1) && !hasVideoPerm()) col.addView(button("Allow All Videos (Full Storage Access)", ac) { if (hasLimitedVisualPerm()) openAppSettings() else reqPerms() })
         col.setPadding(dp(12), 0, 0, 0)
         val title = RgbTextView(this)
         title.textSize = 14f
@@ -1138,7 +1142,7 @@ class MainActivity : Activity() {
                     pool.execute {
                         android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
                         val b: Bitmap? = try {
-                            contentResolver.loadThumbnail(u, Size(256, 144), null)
+                            loadMediaThumb(u)
                         } catch (e: Exception) {
                             null
                         }
@@ -1154,6 +1158,31 @@ class MainActivity : Activity() {
             return v
         }
     }
+    }
+
+    private fun loadMediaThumb(u: Uri): Bitmap? {
+        try { contentResolver.loadThumbnail(u, Size(320, 180), null)?.let { return it } } catch (_: Exception) {}
+        val mmr = android.media.MediaMetadataRetriever()
+        return try {
+            mmr.setDataSource(this, u)
+            if (isAudio(u)) mmr.embeddedPicture?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }
+            else {
+                var bmp: Bitmap? = if (Build.VERSION.SDK_INT >= 27) {
+                    try { mmr.getScaledFrameAtTime(1_000_000L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 320, 180) } catch (_: Exception) { null }
+                        ?: try { mmr.getScaledFrameAtTime(0L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 320, 180) } catch (_: Exception) { null }
+                } else null
+                if (bmp == null) {
+                    val raw = try { mmr.getFrameAtTime(1_000_000L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: mmr.getFrameAtTime(0L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC) } catch (_: Exception) { null }
+                    if (raw != null) {
+                        val sc = minOf(320f / raw.width.coerceAtLeast(1), 180f / raw.height.coerceAtLeast(1), 1f)
+                        val tw = (raw.width * sc).toInt().coerceAtLeast(1)
+                        val th = (raw.height * sc).toInt().coerceAtLeast(1)
+                        bmp = if (tw < raw.width || th < raw.height) Bitmap.createScaledBitmap(raw, tw, th, true).also { if (it !== raw) raw.recycle() } else raw
+                    }
+                }
+                bmp
+            }
+        } catch (_: Exception) { null } finally { try { mmr.release() } catch (_: Exception) {} }
     }
 
     // ================= mini player =================
