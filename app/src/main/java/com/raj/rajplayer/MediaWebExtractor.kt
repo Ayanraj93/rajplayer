@@ -20,6 +20,7 @@ import android.webkit.WebViewClient
 import android.widget.Toast
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
@@ -73,9 +74,7 @@ object MediaWebExtractor {
             val method = request.httpMethod().uppercase()
             val bodyBytes = request.dataToSend()
             if (method == "POST" || bodyBytes != null) {
-                val mediaType = okhttp3.MediaType.parse(
-                    request.headers()["Content-Type"]?.firstOrNull() ?: "application/json; charset=utf-8"
-                )
+                val mediaType = (request.headers()["Content-Type"]?.firstOrNull() ?: "application/json; charset=utf-8").toMediaTypeOrNull()
                 val reqBody = (bodyBytes ?: ByteArray(0)).toRequestBody(mediaType)
                 builder.method(method, reqBody)
             } else {
@@ -83,18 +82,18 @@ object MediaWebExtractor {
             }
 
             httpClient.newCall(builder.build()).execute().use { resp ->
-                if (resp.code() == 429) {
+                if (resp.code == 429) {
                     throw ReCaptchaException("Rate limited (HTTP 429)", request.url())
                 }
-                val respBody = resp.body()?.string() ?: ""
+                val respBody = resp.body?.string() ?: ""
                 val respBytes = respBody.toByteArray(Charsets.UTF_8)
                 val headerMap = LinkedHashMap<String, MutableList<String>>()
-                for (name in resp.headers().names()) {
+                for (name in resp.headers.names()) {
                     headerMap[name] = resp.headers(name).toMutableList()
                 }
                 return NpResponse(
-                    resp.code(),
-                    resp.message(),
+                    resp.code,
+                    resp.message,
                     headerMap,
                     respBody,
                     respBytes
