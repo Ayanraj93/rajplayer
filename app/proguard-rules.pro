@@ -25,3 +25,14 @@
 -dontwarn okhttp3.**
 -dontwarn okio.**
 -dontwarn org.schabi.newpipe.**
+
+# Keep Rhino JS engine used by NewPipeExtractor for YouTube stream decryption
+-keep class org.mozilla.javascript.** { *; }
+-dontwarn org.mozilla.**
+-dontwarn javax.script.**
+-dontwarn javax.swing.**
+-dontwarn java.awt.**
+-dontwarn org.conscrypt.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.openjsse.**
+-dontwarn org.slf4j.**

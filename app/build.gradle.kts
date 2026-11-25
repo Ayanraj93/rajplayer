@@ -69,6 +69,7 @@ android {
     ndkVersion = "27.2.12479018"
 
     compileOptions {
+        isCoreLibraryDesugaringEnabled = true
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
@@ -92,10 +93,7 @@ dependencies {
     implementation("androidx.swiperefreshlayout:swiperefreshlayout:1.1.0")
     // LGPL LAME 3.100 Prefab package; built for Android native ABIs.
     implementation("com.fpliu.ndk.pkg.prefab.android.21:lame:3.100")
-    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.24.4") {
-        exclude(group = "org.jsoup", module = "jsoup")
-        exclude(group = "org.mozilla", module = "rhino")
-    }
-    implementation("org.jsoup:jsoup:1.17.2")
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs_nio:2.0.4")
+    implementation("com.github.TeamNewPipe:NewPipeExtractor:v0.24.4")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
 }

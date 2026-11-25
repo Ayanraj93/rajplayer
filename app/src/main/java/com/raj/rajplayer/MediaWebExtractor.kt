@@ -14,13 +14,12 @@ import android.os.Handler
 import android.os.Looper
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
-import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
-import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
@@ -40,7 +39,7 @@ data class WebMediaItem(
     val uploader: String,
     val durationSec: Long,
     val thumbUrl: String,
-    val sourceType: String // "youtube", "instagram", "facebook", "direct"
+    val sourceType: String
 )
 
 data class ResolvedStream(
@@ -74,7 +73,8 @@ object MediaWebExtractor {
             val method = request.httpMethod().uppercase()
             val bodyBytes = request.dataToSend()
             if (method == "POST" || bodyBytes != null) {
-                val mediaType = (request.headers()["Content-Type"]?.firstOrNull() ?: "application/json; charset=utf-8").toMediaTypeOrNull()
+                val mediaType = (request.headers()["Content-Type"]?.firstOrNull()
+                    ?: "application/json; charset=utf-8").toMediaTypeOrNull()
                 val reqBody = (bodyBytes ?: ByteArray(0)).toRequestBody(mediaType)
                 builder.method(method, reqBody)
             } else {
@@ -86,7 +86,6 @@ object MediaWebExtractor {
                     throw ReCaptchaException("Rate limited (HTTP 429)", request.url())
                 }
                 val respBody = resp.body?.string() ?: ""
-                val respBytes = respBody.toByteArray(Charsets.UTF_8)
                 val headerMap = LinkedHashMap<String, MutableList<String>>()
                 for (name in resp.headers.names()) {
                     headerMap[name] = resp.headers(name).toMutableList()
@@ -96,7 +95,7 @@ object MediaWebExtractor {
                     resp.message,
                     headerMap,
                     respBody,
-                    respBytes
+                    resp.request.url.toString()
                 )
             }
         }
@@ -167,7 +166,6 @@ object MediaWebExtractor {
             }
         }
 
-        // Prefer progressive video streams with audio first so ExoPlayer plays smoothly out-of-the-box
         val progressive = info.videoStreams
             ?.filter { !it.content.isNullOrBlank() }
             ?.sortedByDescending { it.height }
@@ -294,7 +292,7 @@ object MediaWebExtractor {
                         """.trimIndent()
                     ) { res ->
                         if (finished) return@evaluateJavascript
-                        val cleaned = res?.trim('"')?.replace("\/", "/") ?: ""
+                        val cleaned = (res ?: "").trim('"').replace("\\/", "/")
                         if (cleaned.isNotEmpty() && !cleaned.startsWith("blob:")) {
                             foundUrl = cleaned
                             finishOnce(ResolvedStream(foundTitle, cleaned), null)
@@ -340,16 +338,23 @@ object MediaWebExtractor {
                 sniffSocialMedia(activity, trimmed, 12_000L, onResult)
             }
             else -> {
-                onResult(ResolvedStream(trimmed.substringAfterLast('/').substringBefore('?').ifBlank { "Stream" }, trimmed), null)
+                onResult(
+                    ResolvedStream(
+                        trimmed.substringAfterLast('/').substringBefore('?').ifBlank { "Stream" },
+                        trimmed
+                    ),
+                    null
+                )
             }
         }
     }
 
     fun startDownload(activity: Activity, title: String, streamUrl: String, isAudio: Boolean = false) {
         try {
+            val badChars = "\\/:*?\"<>|"
             val cleanBase = buildString {
                 for (ch in title) {
-                    if (ch.code >= 32 && "\/:*?"<>|".indexOf(ch) < 0) append(ch)
+                    if (ch.code >= 32 && badChars.indexOf(ch) < 0) append(ch)
                 }
             }.trim().take(60).ifBlank { "RajPlayer_Media" }
             val ext = when {
@@ -364,7 +369,10 @@ object MediaWebExtractor {
                 .setTitle(fileName)
                 .setDescription("Downloading via RajPlayer")
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
-                .setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, "RajPlayer" + File.separator + fileName)
+                .setDestinationInExternalPublicDir(
+                    Environment.DIRECTORY_DOWNLOADS,
+                    "RajPlayer" + File.separator + fileName
+                )
                 .setAllowedOverMetered(true)
                 .setAllowedOverRoaming(true)
 
