@@ -20,6 +20,7 @@ import android.provider.Settings
 import android.widget.Toast
 import java.io.File
 import java.io.FileInputStream
+import java.io.BufferedOutputStream
 import java.io.FileOutputStream
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -340,7 +341,7 @@ object Hooks {
             decoder.configure(inputFormat, null, null, 0)
             decoder.start()
 
-            FileOutputStream(temp).use { output ->
+            BufferedOutputStream(FileOutputStream(temp), 65536).use { output ->
                 val info = MediaCodec.BufferInfo()
                 var inputEos = false
                 var outputEos = false
@@ -382,7 +383,7 @@ object Hooks {
                     if (cancelled.get()) throw InterruptedException("Conversion cancelled")
 
                     if (!inputEos) {
-                        val inputIndex = decoder.dequeueInputBuffer(10_000)
+                        val inputIndex = decoder.dequeueInputBuffer(1_000)
                         if (inputIndex >= 0) {
                             val inputBuffer = decoder.getInputBuffer(inputIndex)
                                 ?: throw IllegalStateException("Decoder input buffer unavailable")
@@ -405,7 +406,7 @@ object Hooks {
                         }
                     }
 
-                    val outputIndex = decoder.dequeueOutputBuffer(info, 10_000)
+                    val outputIndex = decoder.dequeueOutputBuffer(info, 1_000)
                     when {
                         outputIndex == MediaCodec.INFO_OUTPUT_FORMAT_CHANGED -> {
                             initLameFromFormat(decoder.outputFormat)

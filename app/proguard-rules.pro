@@ -17,3 +17,11 @@
 -dontwarn javax.annotation.**
 -dontwarn com.google.j2objc.**
 -dontwarn org.codehaus.mojo.animal_sniffer.**
+
+# Keep NewPipeExtractor & OkHttp models
+-keep class org.schabi.newpipe.** { *; }
+-keep class okhttp3.** { *; }
+-keep class okio.** { *; }
+-dontwarn okhttp3.**
+-dontwarn okio.**
+-dontwarn org.schabi.newpipe.**
