@@ -356,9 +356,12 @@ class MainActivity : Activity() {
     private fun tabBtn(t: String, sel: Boolean, ac: Int, tc: Int, f: () -> Unit): TextView {
         val v = TextView(this)
         v.text = t
-        v.textSize = 14f
+        v.textSize = 12.5f
+        v.maxLines = 1
+        v.setSingleLine(true)
+        v.ellipsize = TextUtils.TruncateAt.END
         v.gravity = Gravity.CENTER
-        v.setPadding(0, dp(10), 0, dp(10))
+        v.setPadding(dp(2), dp(10), dp(2), dp(10))
         if (sel) {
             v.setBackgroundColor(ac)
             v.setTextColor(contrast(ac))
@@ -716,7 +719,7 @@ class MainActivity : Activity() {
         MediaWebExtractor.resolveAnyUrl(this, rawUrl, preferAudio = false) { resolved, err ->
             if (prog.isShowing) prog.dismiss()
             if (resolved != null && resolved.streamUrl.isNotEmpty()) {
-                MediaWebExtractor.startDownload(this, resolved.title, resolved.streamUrl, resolved.isAudioOnly)
+                MediaWebExtractor.startDownload(this, resolved)
             } else {
                 toast(err ?: "Could not download link")
             }

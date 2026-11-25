@@ -21,13 +21,13 @@ import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONObject
 import org.schabi.newpipe.extractor.NewPipe
 import org.schabi.newpipe.extractor.ServiceList
 import org.schabi.newpipe.extractor.downloader.Downloader
 import org.schabi.newpipe.extractor.downloader.Request as NpRequest
 import org.schabi.newpipe.extractor.downloader.Response as NpResponse
 import org.schabi.newpipe.extractor.exceptions.ReCaptchaException
-import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.io.File
 import java.io.IOException
@@ -46,10 +46,19 @@ data class ResolvedStream(
     val title: String,
     val streamUrl: String,
     val audioUrl: String? = null,
-    val isAudioOnly: Boolean = false
+    val isAudioOnly: Boolean = false,
+    val userAgent: String = MediaWebExtractor.MOBILE_CHROME_UA,
+    val referer: String = ""
 )
 
 object MediaWebExtractor {
+    const val MOBILE_CHROME_UA =
+        "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+    private const val ANDROID_VR_UA =
+        "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
+    private const val IOS_YT_UA =
+        "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X; en_IN)"
+
     private var initialized = false
 
     private val httpClient: OkHttpClient by lazy {
@@ -122,6 +131,26 @@ object MediaWebExtractor {
         }
     }
 
+    fun extractYouTubeVideoId(rawUrl: String): String? {
+        val trimmed = rawUrl.trim()
+        if (Regex("^[A-Za-z0-9_-]{11}$").matches(trimmed)) return trimmed
+        return try {
+            val uri = Uri.parse(trimmed)
+            val host = (uri.host ?: "").lowercase()
+            if (host.contains("youtu.be")) {
+                uri.pathSegments.firstOrNull()?.takeIf { it.isNotBlank() }
+            } else {
+                val vParam = uri.getQueryParameter("v")
+                if (!vParam.isNullOrBlank()) return vParam
+                val segs = uri.pathSegments
+                val markerIdx = segs.indexOfFirst { it == "shorts" || it == "embed" || it == "live" || it == "v" }
+                if (markerIdx >= 0 && markerIdx + 1 < segs.size) segs[markerIdx + 1] else null
+            }
+        } catch (_: Exception) {
+            null
+        }
+    }
+
     fun searchYouTube(query: String): List<WebMediaItem> {
         ensureInit()
         val q = query.trim()
@@ -151,64 +180,225 @@ object MediaWebExtractor {
         return out
     }
 
-    fun resolveYouTube(pageUrl: String, preferAudio: Boolean = false): ResolvedStream {
-        ensureInit()
-        val yt = ServiceList.YouTube
-        val info = StreamInfo.getInfo(yt, pageUrl.trim())
-        val title = info.name ?: "YouTube Media"
+    private fun queryInnerTubePlayer(
+        videoId: String,
+        clientName: String,
+        clientId: String,
+        clientVersion: String,
+        userAgent: String,
+        clientObj: JSONObject,
+        preferAudio: Boolean
+    ): ResolvedStream? {
+        val contextObj = JSONObject().apply {
+            put("client", clientObj)
+        }
+        val playbackCtx = JSONObject().apply {
+            put("contentPlaybackContext", JSONObject().put("html5Preference", "HTML5_PREF_WANTS"))
+        }
+        val payload = JSONObject().apply {
+            put("videoId", videoId)
+            put("context", contextObj)
+            put("playbackContext", playbackCtx)
+            put("contentCheckOk", true)
+            put("racyCheckOk", true)
+        }
 
-        if (preferAudio) {
-            val bestAudio = info.audioStreams
-                ?.filter { !it.content.isNullOrBlank() }
-                ?.maxByOrNull { it.averageBitrate }
-            if (bestAudio != null) {
-                return ResolvedStream(title, bestAudio.content, bestAudio.content, isAudioOnly = true)
+        val req = Request.Builder()
+            .url("https://www.youtube.com/youtubei/v1/player?prettyPrint=false")
+            .header("User-Agent", userAgent)
+            .header("Content-Type", "application/json")
+            .header("X-YouTube-Client-Name", clientId)
+            .header("X-YouTube-Client-Version", clientVersion)
+            .header("Origin", "https://www.youtube.com")
+            .post(payload.toString().toByteArray(Charsets.UTF_8).toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull()))
+            .build()
+
+        httpClient.newCall(req).execute().use { resp ->
+            if (!resp.isSuccessful) return null
+            val bodyStr = resp.body?.string() ?: return null
+            val json = JSONObject(bodyStr)
+            val status = json.optJSONObject("playabilityStatus")?.optString("status") ?: ""
+            if (status != "OK") return null
+
+            val title = json.optJSONObject("videoDetails")?.optString("title")
+                ?.takeIf { it.isNotBlank() } ?: "YouTube Video"
+            val streaming = json.optJSONObject("streamingData") ?: return null
+
+            var bestProgUrl: String? = null
+            var bestProgHeight = -1
+            val formats = streaming.optJSONArray("formats")
+            if (formats != null) {
+                for (i in 0 until formats.length()) {
+                    val f = formats.optJSONObject(i) ?: continue
+                    val u = f.optString("url")
+                    val mime = f.optString("mimeType")
+                    val h = f.optInt("height", 0)
+                    if (u.isNotBlank() && mime.contains("video/mp4") && h >= bestProgHeight) {
+                        bestProgHeight = h
+                        bestProgUrl = u
+                    }
+                }
             }
-        }
 
-        val progressive = info.videoStreams
-            ?.filter { !it.content.isNullOrBlank() }
-            ?.sortedByDescending { it.height }
-            ?.firstOrNull()
-        if (progressive != null) {
-            return ResolvedStream(title, progressive.content, null, isAudioOnly = false)
-        }
+            var bestAudioUrl: String? = null
+            var bestAudioBitrate = -1
+            var bestAdaptiveVideoUrl: String? = null
+            var bestAdaptiveHeight = -1
+            val adaptive = streaming.optJSONArray("adaptiveFormats")
+            if (adaptive != null) {
+                for (i in 0 until adaptive.length()) {
+                    val f = adaptive.optJSONObject(i) ?: continue
+                    val u = f.optString("url")
+                    if (u.isBlank()) continue
+                    val mime = f.optString("mimeType")
+                    if (mime.startsWith("audio/mp4") || mime.startsWith("audio/")) {
+                        val br = f.optInt("bitrate", 0)
+                        if (br >= bestAudioBitrate) {
+                            bestAudioBitrate = br
+                            bestAudioUrl = u
+                        }
+                    } else if (mime.startsWith("video/mp4")) {
+                        val h = f.optInt("height", 0)
+                        if (h >= bestAdaptiveHeight) {
+                            bestAdaptiveHeight = h
+                            bestAdaptiveVideoUrl = u
+                        }
+                    }
+                }
+            }
 
-        val videoOnly = info.videoOnlyStreams
-            ?.filter { !it.content.isNullOrBlank() }
-            ?.sortedByDescending { it.height }
-            ?.firstOrNull()
-        val bestAudio = info.audioStreams
-            ?.filter { !it.content.isNullOrBlank() }
-            ?.maxByOrNull { it.averageBitrate }
-        if (videoOnly != null) {
-            return ResolvedStream(title, videoOnly.content, bestAudio?.content, isAudioOnly = false)
+            if (preferAudio && !bestAudioUrl.isNullOrBlank()) {
+                return ResolvedStream(
+                    title = title,
+                    streamUrl = bestAudioUrl,
+                    audioUrl = bestAudioUrl,
+                    isAudioOnly = true,
+                    userAgent = userAgent,
+                    referer = "https://www.youtube.com/"
+                )
+            }
+
+            if (!bestProgUrl.isNullOrBlank()) {
+                return ResolvedStream(
+                    title = title,
+                    streamUrl = bestProgUrl,
+                    audioUrl = bestAudioUrl,
+                    isAudioOnly = false,
+                    userAgent = userAgent,
+                    referer = "https://www.youtube.com/"
+                )
+            }
+
+            val hlsUrl = streaming.optString("hlsManifestUrl")
+            if (hlsUrl.isNotBlank()) {
+                return ResolvedStream(
+                    title = title,
+                    streamUrl = hlsUrl,
+                    audioUrl = bestAudioUrl,
+                    isAudioOnly = false,
+                    userAgent = userAgent,
+                    referer = "https://www.youtube.com/"
+                )
+            }
+
+            if (!bestAdaptiveVideoUrl.isNullOrBlank()) {
+                return ResolvedStream(
+                    title = title,
+                    streamUrl = bestAdaptiveVideoUrl,
+                    audioUrl = bestAudioUrl,
+                    isAudioOnly = false,
+                    userAgent = userAgent,
+                    referer = "https://www.youtube.com/"
+                )
+            }
+            return null
         }
-        if (bestAudio != null) {
-            return ResolvedStream(title, bestAudio.content, bestAudio.content, isAudioOnly = true)
-        }
-        throw IllegalStateException("No playable stream found for this link")
     }
 
-    fun sniffSocialMedia(
+    fun resolveYouTubeViaInnerTube(pageUrl: String, preferAudio: Boolean = false): ResolvedStream? {
+        val videoId = extractYouTubeVideoId(pageUrl) ?: return null
+
+        // 1. Try ANDROID_VR client (returns clean progressive MP4 + adaptive URLs without reload error)
+        try {
+            val vrClient = JSONObject().apply {
+                put("clientName", "ANDROID_VR")
+                put("clientVersion", "1.60.19")
+                put("deviceMake", "Oculus")
+                put("deviceModel", "Quest 3")
+                put("androidSdkVersion", 32)
+                put("osName", "Android")
+                put("osVersion", "12L")
+                put("hl", "en")
+                put("gl", "IN")
+            }
+            val r1 = queryInnerTubePlayer(videoId, "ANDROID_VR", "28", "1.60.19", ANDROID_VR_UA, vrClient, preferAudio)
+            if (r1 != null) return r1
+        } catch (_: Exception) {
+        }
+
+        // 2. Try IOS client
+        try {
+            val iosClient = JSONObject().apply {
+                put("clientName", "IOS")
+                put("clientVersion", "19.45.4")
+                put("deviceMake", "Apple")
+                put("deviceModel", "iPhone16,2")
+                put("osName", "iPhone")
+                put("osVersion", "18.1.0.22B83")
+                put("hl", "en")
+                put("gl", "IN")
+            }
+            val r2 = queryInnerTubePlayer(videoId, "IOS", "5", "19.45.4", IOS_YT_UA, iosClient, preferAudio)
+            if (r2 != null) return r2
+        } catch (_: Exception) {
+        }
+
+        // 3. Try TVHTML5_SIMPLY_EMBEDDED_PLAYER client
+        try {
+            val tvClient = JSONObject().apply {
+                put("clientName", "TVHTML5_SIMPLY_EMBEDDED_PLAYER")
+                put("clientVersion", "2.0")
+                put("hl", "en")
+                put("gl", "IN")
+            }
+            val r3 = queryInnerTubePlayer(videoId, "TVHTML5_SIMPLY_EMBEDDED_PLAYER", "85", "2.0", MOBILE_CHROME_UA, tvClient, preferAudio)
+            if (r3 != null) return r3
+        } catch (_: Exception) {
+        }
+
+        return null
+    }
+
+    private fun stripRangeParams(url: String): String {
+        return url
+            .replace(Regex("([?&])range=[^&]*"), "$1")
+            .replace(Regex("([?&])bytestart=[^&]*"), "$1")
+            .replace(Regex("([?&])byteend=[^&]*"), "$1")
+            .replace("?&", "?")
+            .replace("&&", "&")
+            .trimEnd('?', '&')
+    }
+
+    fun sniffWebMedia(
         context: Context,
         pageUrl: String,
-        timeoutMs: Long = 12_000L,
+        isYouTubeFallback: Boolean = false,
+        timeoutMs: Long = 15_000L,
         onResult: (ResolvedStream?, String?) -> Unit
     ) {
         val mainHandler = Handler(Looper.getMainLooper())
         mainHandler.post {
             var finished = false
-            var foundUrl: String? = null
-            var foundTitle = "Social Video"
+            var foundVideoUrl: String? = null
+            var foundAudioUrl: String? = null
+            var foundTitle = if (isYouTubeFallback) "YouTube Video" else "Social Video"
 
             val webView = WebView(context.applicationContext)
             val settings = webView.settings
             settings.javaScriptEnabled = true
             settings.domStorageEnabled = true
             settings.mediaPlaybackRequiresUserGesture = false
-            settings.userAgentString =
-                "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Mobile Safari/537.36"
+            settings.userAgentString = MOBILE_CHROME_UA
 
             fun finishOnce(stream: ResolvedStream?, err: String?) {
                 if (finished) return
@@ -222,64 +412,64 @@ object MediaWebExtractor {
                 onResult(stream, err)
             }
 
-            fun looksLikeMediaUrl(url: String): Boolean {
-                val low = url.lowercase()
-                if (low.startsWith("blob:") || low.startsWith("data:")) return false
-                if (low.contains(".mp4") || low.contains(".m4a") || low.contains(".m3u8")) {
-                    if (!low.contains("thumbnail") && !low.contains("poster") && !low.contains("sprite")) {
-                        return true
-                    }
-                }
-                return false
-            }
+            fun evaluateCandidate(rawUrl: String, viewTitle: String?) {
+                if (finished || rawUrl.isBlank()) return
+                val low = rawUrl.lowercase()
+                if (low.startsWith("blob:") || low.startsWith("data:")) return
+                if (low.contains(".jpg") || low.contains(".jpeg") || low.contains(".png") ||
+                    low.contains(".webp") || low.contains("thumbnail") || low.contains("poster") ||
+                    low.contains("sprite") || low.contains("init.mp4")
+                ) return
 
-            val timeoutRunnable = Runnable {
-                val candidate = foundUrl
-                if (!candidate.isNullOrBlank()) {
-                    finishOnce(ResolvedStream(foundTitle, candidate), null)
-                } else {
-                    finishOnce(null, "Could not extract public video link (check if post/reel is public)")
-                }
-            }
-
-            webView.webViewClient = object : WebViewClient() {
-                override fun onLoadResource(view: WebView?, url: String?) {
-                    super.onLoadResource(view, url)
-                    if (finished || url.isNullOrBlank()) return
-                    if (looksLikeMediaUrl(url)) {
-                        foundUrl = url
-                        val pageTitle = view?.title?.trim()
-                        if (!pageTitle.isNullOrBlank()) foundTitle = pageTitle
-                        finishOnce(ResolvedStream(foundTitle, url), null)
-                    }
+                if (!viewTitle.isNullOrBlank() && viewTitle != "YouTube" && viewTitle != "Instagram" && viewTitle != "Facebook") {
+                    foundTitle = viewTitle.trim()
                 }
 
-                override fun shouldInterceptRequest(
-                    view: WebView?,
-                    request: WebResourceRequest?
-                ): WebResourceResponse? {
-                    val reqUrl = request?.url?.toString() ?: ""
-                    if (!finished && looksLikeMediaUrl(reqUrl)) {
-                        foundUrl = reqUrl
-                        mainHandler.post {
-                            val t = view?.title?.trim()
-                            if (!t.isNullOrBlank()) foundTitle = t
-                            finishOnce(ResolvedStream(foundTitle, reqUrl), null)
+                if (low.contains("googlevideo.com/videoplayback")) {
+                    val clean = stripRangeParams(rawUrl)
+                    if (low.contains("mime=audio") || low.contains("mime%3daudio")) {
+                        foundAudioUrl = clean
+                    } else if (low.contains("mime=video") || low.contains("mime%3dvideo") || low.contains("itag=18") || low.contains("itag=22")) {
+                        foundVideoUrl = clean
+                        if (low.contains("itag=18") || low.contains("itag=22")) {
+                            finishOnce(
+                                ResolvedStream(foundTitle, clean, foundAudioUrl, false, MOBILE_CHROME_UA, "https://m.youtube.com/"),
+                                null
+                            )
                         }
                     }
-                    return super.shouldInterceptRequest(view, request)
+                    return
                 }
 
-                override fun onPageFinished(view: WebView?, url: String?) {
-                    super.onPageFinished(view, url)
+                val isSocialCdn = low.contains("fbcdn.net") || low.contains("cdninstagram.com")
+                val isDirectMedia = low.contains(".mp4") || low.contains(".m4a") || low.contains(".m3u8")
+                if (isDirectMedia || (isSocialCdn && (low.contains("/v/") || low.contains("video")))) {
+                    val clean = stripRangeParams(rawUrl)
+                    foundVideoUrl = clean
+                    finishOnce(
+                        ResolvedStream(foundTitle, clean, null, false, MOBILE_CHROME_UA, pageUrl),
+                        null
+                    )
+                }
+            }
+
+            val pollJsRunnable = object : Runnable {
+                override fun run() {
                     if (finished) return
-                    val t = view?.title?.trim()
-                    if (!t.isNullOrBlank()) foundTitle = t
-                    view?.evaluateJavascript(
+                    val currentTitle = webView.title
+                    webView.evaluateJavascript(
                         """
                         (function() {
+                            var btns = document.querySelectorAll('button, [role="button"]');
+                            for (var b = 0; b < btns.length; b++) {
+                                var txt = (btns[b].innerText || btns[b].getAttribute('aria-label') || '').toLowerCase();
+                                if (txt === 'play' || txt.indexOf('play video') >= 0 || txt.indexOf('unmute') >= 0) {
+                                    try { btns[b].click(); } catch(e) {}
+                                }
+                            }
                             var vids = document.querySelectorAll('video');
                             for (var i = 0; i < vids.length; i++) {
+                                try { vids[i].muted = true; vids[i].play(); } catch(e) {}
                                 if (vids[i].currentSrc && vids[i].currentSrc.indexOf('blob:') !== 0) return vids[i].currentSrc;
                                 if (vids[i].src && vids[i].src.indexOf('blob:') !== 0) return vids[i].src;
                                 var srcs = vids[i].querySelectorAll('source');
@@ -294,16 +484,65 @@ object MediaWebExtractor {
                         if (finished) return@evaluateJavascript
                         val cleaned = (res ?: "").trim('"').replace("\\/", "/")
                         if (cleaned.isNotEmpty() && !cleaned.startsWith("blob:")) {
-                            foundUrl = cleaned
-                            finishOnce(ResolvedStream(foundTitle, cleaned), null)
+                            evaluateCandidate(cleaned, currentTitle)
                         }
                     }
+                    mainHandler.postDelayed(this, 900L)
                 }
             }
 
+            val timeoutRunnable = Runnable {
+                val vid = foundVideoUrl
+                val aud = foundAudioUrl
+                when {
+                    !vid.isNullOrBlank() -> finishOnce(
+                        ResolvedStream(foundTitle, vid, aud, false, MOBILE_CHROME_UA, pageUrl),
+                        null
+                    )
+                    !aud.isNullOrBlank() -> finishOnce(
+                        ResolvedStream(foundTitle, aud, aud, true, MOBILE_CHROME_UA, pageUrl),
+                        null
+                    )
+                    else -> finishOnce(
+                        null,
+                        if (isYouTubeFallback) "YouTube video could not be loaded (check internet or try another video)"
+                        else "Could not extract public video (ensure Instagram/Facebook post or reel is public)"
+                    )
+                }
+            }
+
+            webView.webViewClient = object : WebViewClient() {
+                override fun onLoadResource(view: WebView?, url: String?) {
+                    super.onLoadResource(view, url)
+                    if (!finished && !url.isNullOrBlank()) {
+                        evaluateCandidate(url, view?.title)
+                    }
+                }
+
+                override fun shouldInterceptRequest(
+                    view: WebView?,
+                    request: WebResourceRequest?
+                ): WebResourceResponse? {
+                    val reqUrl = request?.url?.toString() ?: ""
+                    if (!finished && reqUrl.isNotEmpty()) {
+                        mainHandler.post {
+                            evaluateCandidate(reqUrl, view?.title)
+                        }
+                    }
+                    return super.shouldInterceptRequest(view, request)
+                }
+            }
+
+            mainHandler.postDelayed(pollJsRunnable, 1200L)
             mainHandler.postDelayed(timeoutRunnable, timeoutMs)
             try {
-                webView.loadUrl(pageUrl.trim())
+                val targetUrl = if (isYouTubeFallback) {
+                    val vidId = extractYouTubeVideoId(pageUrl)
+                    if (vidId != null) "https://m.youtube.com/watch?v=$vidId" else pageUrl.trim()
+                } else {
+                    pageUrl.trim()
+                }
+                webView.loadUrl(targetUrl)
             } catch (e: Exception) {
                 finishOnce(null, e.message ?: "Failed to load URL")
             }
@@ -324,18 +563,17 @@ object MediaWebExtractor {
         when (detectSource(trimmed)) {
             "youtube" -> {
                 Thread {
-                    try {
-                        val r = resolveYouTube(trimmed, preferAudio)
-                        activity.runOnUiThread { onResult(r, null) }
-                    } catch (e: Exception) {
-                        activity.runOnUiThread {
-                            onResult(null, e.message ?: "YouTube link resolution failed")
-                        }
+                    val innerTubeResult = resolveYouTubeViaInnerTube(trimmed, preferAudio)
+                    if (innerTubeResult != null) {
+                        activity.runOnUiThread { onResult(innerTubeResult, null) }
+                    } else {
+                        // Automatic Stage-2 fallback: silent mobile WebView sniffer
+                        sniffWebMedia(activity, trimmed, isYouTubeFallback = true, timeoutMs = 15_000L, onResult = onResult)
                     }
                 }.start()
             }
             "instagram", "facebook" -> {
-                sniffSocialMedia(activity, trimmed, 12_000L, onResult)
+                sniffWebMedia(activity, trimmed, isYouTubeFallback = false, timeoutMs = 15_000L, onResult = onResult)
             }
             else -> {
                 onResult(
@@ -349,25 +587,26 @@ object MediaWebExtractor {
         }
     }
 
-    fun startDownload(activity: Activity, title: String, streamUrl: String, isAudio: Boolean = false) {
+    fun startDownload(activity: Activity, resolved: ResolvedStream) {
         try {
             val badChars = "\\/:*?\"<>|"
             val cleanBase = buildString {
-                for (ch in title) {
+                for (ch in resolved.title) {
                     if (ch.code >= 32 && badChars.indexOf(ch) < 0) append(ch)
                 }
             }.trim().take(60).ifBlank { "RajPlayer_Media" }
             val ext = when {
-                isAudio || streamUrl.contains(".m4a", ignoreCase = true) -> ".m4a"
-                streamUrl.contains(".webm", ignoreCase = true) -> ".webm"
+                resolved.isAudioOnly || resolved.streamUrl.contains(".m4a", ignoreCase = true) -> ".m4a"
+                resolved.streamUrl.contains(".webm", ignoreCase = true) -> ".webm"
                 else -> ".mp4"
             }
             val fileName = cleanBase + ext
             val subDir = Environment.DIRECTORY_DOWNLOADS + File.separator + "RajPlayer"
 
-            val request = DownloadManager.Request(Uri.parse(streamUrl))
+            val request = DownloadManager.Request(Uri.parse(resolved.streamUrl))
                 .setTitle(fileName)
                 .setDescription("Downloading via RajPlayer")
+                .addRequestHeader("User-Agent", resolved.userAgent)
                 .setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED)
                 .setDestinationInExternalPublicDir(
                     Environment.DIRECTORY_DOWNLOADS,
@@ -375,6 +614,10 @@ object MediaWebExtractor {
                 )
                 .setAllowedOverMetered(true)
                 .setAllowedOverRoaming(true)
+
+            if (resolved.referer.isNotBlank()) {
+                request.addRequestHeader("Referer", resolved.referer)
+            }
 
             val dm = activity.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
             val downloadId = dm.enqueue(request)
