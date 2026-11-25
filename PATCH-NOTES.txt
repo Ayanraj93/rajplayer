@@ -1,0 +1,8 @@
+RajPlayer playback delay patch
+
+Replace the two Kotlin files at the matching paths in your project.
+Changes:
+1. Notification content tap targets the same orientation-specific video Activity used by the video list.
+2. PlayerActivity no longer disables/re-enables the video track on background/resume, avoiding a forced video decoder restart.
+No queue reload, prepare(), or seekTo() was added.
+Build verification is still required with GitHub Actions.

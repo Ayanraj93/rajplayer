@@ -1,0 +1,259 @@
+diff --git a/app/src/main/java/com/raj/rajplayer/MainActivity.kt b/app/src/main/java/com/raj/rajplayer/MainActivity.kt
+index df277dd..b5be0f0 100644
+--- a/app/src/main/java/com/raj/rajplayer/MainActivity.kt
++++ b/app/src/main/java/com/raj/rajplayer/MainActivity.kt
+@@ -81,6 +81,7 @@ class MainActivity : Activity() {
+     private var searchOn = false
+     private var query = ""
+     private var selectMode = false
++    private var conversionSelectMode = false
+     private var gestureGuideShowing = false
+     private val selected = LinkedHashSet<String>()
+     private val rgbTargets = ArrayList<(Int) -> Unit>()
+@@ -284,7 +285,14 @@ class MainActivity : Activity() {
+         v.textSize = 22f
+         v.setTextColor(color)
+         v.setPadding(dp(10), dp(8), dp(10), dp(8))
+-        v.setOnClickListener { f() }
++        v.setOnClickListener {
++            if (t.contains("\u2699")) {
++                v.animate().cancel()
++                v.rotation = 0f
++                v.animate().rotationBy(360f).setDuration(700L).start()
++            }
++            f()
++        }
+         return v
+     }
+ 
+@@ -667,6 +675,7 @@ class MainActivity : Activity() {
+ 
+     private fun exitSelect() {
+         selectMode = false
++        conversionSelectMode = false
+         selected.clear()
+         showHome()
+     }
+@@ -1032,15 +1041,22 @@ class MainActivity : Activity() {
+             selCountTv = cnt
+             head.addView(cnt, LinearLayout.LayoutParams(0, WC, 1f))
+             head.addView(sym("\u2611", ic) { selectAll() })
+-            head.addView(sym("\u2B50", ic) { favSelected() })
+-            head.addView(sym("\uD83C\uDFB5", ic) {
+-                val chosen = shown.filter { selected.contains(it.uri.toString()) }
+-                Hooks.convert(this, chosen.map { it.uri }, chosen.map { it.name }) {
+-                    dirty = true
+-                    exitSelect()
+-                }
+-            })
+-            head.addView(sym("\uD83D\uDDD1", Color.parseColor("#FF5252")) { confirmDelete() })
++            if (conversionSelectMode) {
++                head.addView(sym("\uD83C\uDFB5", ic) {
++                    val chosen = shown.filter { selected.contains(it.uri.toString()) }
++                    if (chosen.isEmpty()) {
++                        toast("Select videos first")
++                    } else {
++                        Hooks.convert(this, chosen.map { it.uri }, chosen.map { it.name }) {
++                            dirty = true
++                            exitSelect()
++                        }
++                    }
++                })
++            } else {
++                head.addView(sym("\u2B50", ic) { favSelected() })
++                head.addView(sym("\uD83D\uDDD1", Color.parseColor("#FF5252")) { confirmDelete() })
++            }
+         } else {
+             selCountTv = null
+             // "RajPlayer Pro" ka chalta-phirta RGB title
+@@ -1051,8 +1067,13 @@ class MainActivity : Activity() {
+             // Long-press avoids accidental conversion selection while tapping the title.
+             brand.setOnLongClickListener {
+                 selectMode = true
++                conversionSelectMode = true
++                tab = 0
++                openFolder = null
++                searchOn = false
++                query = ""
+                 selected.clear()
+-                toast("Select videos for multiple conversion")
++                toast("Video conversion mode: select videos")
+                 showHome()
+                 true
+             }
+@@ -1096,9 +1117,9 @@ class MainActivity : Activity() {
+             Prefs.setGridView(this, !Prefs.gridView(this))
+             showHome()
+         })
+-        root.addView(navRow)
++        if (!conversionSelectMode) root.addView(navRow)
+ 
+-        if (searchOn) {
++        if (searchOn && !conversionSelectMode) {
+             val se = EditText(this)
+             se.hint = "Search media..."
+             se.setTextColor(tc)
+@@ -1122,7 +1143,7 @@ class MainActivity : Activity() {
+         miniBar = buildMini(ac)
+         val mlp = LinearLayout.LayoutParams(MP, WC)
+         mlp.setMargins(0, dp(6), 0, 0)
+-        root.addView(miniBar, mlp)
++        if (!conversionSelectMode) root.addView(miniBar, mlp)
+ 
+         renderList()
+         refreshMini()
+@@ -1159,7 +1180,10 @@ class MainActivity : Activity() {
+         val of = openFolder
+         val q = query.trim().lowercase()
+ 
+-        if (q.isNotEmpty()) {
++        if (conversionSelectMode) {
++            shown = videos
++            for (v in shown) items.add(itemOf(v, "V"))
++        } else if (q.isNotEmpty()) {
+             shown = (videos + audios).filter { it.name.lowercase().contains(q) }
+             for (v in shown) items.add(itemOf(v, if (isAudio(v.uri)) "\uD83C\uDFB5" else "V"))
+         } else if (tab == 3) {
+diff --git a/app/src/main/java/com/raj/rajplayer/PlayerActivity.kt b/app/src/main/java/com/raj/rajplayer/PlayerActivity.kt
+index e5083b5..392d2db 100644
+--- a/app/src/main/java/com/raj/rajplayer/PlayerActivity.kt
++++ b/app/src/main/java/com/raj/rajplayer/PlayerActivity.kt
+@@ -73,6 +73,7 @@ open class PlayerActivity : Activity() {
+     private var audioMode = false
+     private var audioChildOpen = false
+     private var systemBarsVisible = false
++    private var lastPlayingState: Boolean? = null
+     private var audioSettingsAnimator: ValueAnimator? = null
+     private var playerGearAnimator: ValueAnimator? = null
+     private var playerSettingsGear: TextView? = null
+@@ -154,6 +155,10 @@ open class PlayerActivity : Activity() {
+                 if (abA >= 0 && abB > abA && t >= abB) seekTo(abA)
+                 if (!userSeeking) curTv.text = fmt(t)
+                 playBtn.text = if (p.isPlaying) "\u23F8" else "\u25B6"
++                if (lastPlayingState != p.isPlaying) {
++                    lastPlayingState = p.isPlaying
++                    applyPlaybackUi(p.isPlaying)
++                }
+                 if (::audioModeSeek.isInitialized) {
+                     if (!userSeeking && audioMode) {
+                         audioModeSeek.max = len.coerceAtMost(Int.MAX_VALUE.toLong()).toInt()
+@@ -211,10 +216,8 @@ open class PlayerActivity : Activity() {
+     private fun hideBars() {
+         systemBarsVisible = false
+         window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_FULLSCREEN
+-                or View.SYSTEM_UI_FLAG_HIDE_NAVIGATION
+                 or View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
+                 or View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
+-                or View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
+                 or View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
+     }
+ 
+@@ -244,7 +247,23 @@ open class PlayerActivity : Activity() {
+         window.decorView.systemUiVisibility = (View.SYSTEM_UI_FLAG_LAYOUT_STABLE)
+     }
+ 
++    private fun showPausedControls() {
++        hideBars()
++        if (locked) {
++            lockBtn.visibility = View.VISIBLE
++        } else {
++            topBar.visibility = View.VISIBLE
++            controls.visibility = View.VISIBLE
++            lockBtn.visibility = View.VISIBLE
++        }
++        ui.removeCallbacks(hideRun)
++    }
++
+     private fun showControls() {
++        if (!Engine.isPlaying()) {
++            showPausedControls()
++            return
++        }
+         showBars()
+         if (locked) {
+             lockBtn.visibility = View.VISIBLE
+@@ -254,7 +273,7 @@ open class PlayerActivity : Activity() {
+             lockBtn.visibility = View.VISIBLE
+         }
+         ui.removeCallbacks(hideRun)
+-        ui.postDelayed(hideRun, 2600)
++        ui.postDelayed(hideRun, 5000L)
+     }
+ 
+     private fun hideControls() {
+@@ -262,6 +281,11 @@ open class PlayerActivity : Activity() {
+         topBar.visibility = View.GONE
+         controls.visibility = View.GONE
+         lockBtn.visibility = View.GONE
++        ui.removeCallbacks(hideRun)
++    }
++
++    private fun applyPlaybackUi(playing: Boolean) {
++        if (playing) hideControls() else showPausedControls()
+     }
+ 
+     private fun controlsVisible() = lockBtn.visibility == View.VISIBLE
+@@ -437,7 +461,11 @@ open class PlayerActivity : Activity() {
+ 
+     private fun togglePlay() {
+         Engine.toggle(this)
+-        showControls()
++        ui.post {
++            val playing = Engine.isPlaying()
++            lastPlayingState = playing
++            applyPlaybackUi(playing)
++        }
+     }
+ 
+ 
+@@ -803,12 +831,18 @@ open class PlayerActivity : Activity() {
+             override fun onDown(e: MotionEvent): Boolean = true
+ 
+             override fun onSingleTapConfirmed(e: MotionEvent): Boolean {
+-                if (!controlsVisible()) {
+-                    showControls() // first tap: controls + Android system bars
+-                } else if (systemBarsVisible) {
+-                    hideBars() // next tap: hide only Android bars; keep controls visible
++                if (Engine.isPlaying()) {
++                    if (!controlsVisible()) {
++                        showControls()
++                    } else if (systemBarsVisible) {
++                        hideBars()
++                        ui.removeCallbacks(hideRun)
++                        ui.postDelayed(hideRun, 5000L)
++                    } else {
++                        hideControls()
++                    }
+                 } else {
+-                    showBars()
++                    if (systemBarsVisible) hideBars() else showBars()
+                 }
+                 return true
+             }
+@@ -1299,19 +1333,18 @@ open class PlayerActivity : Activity() {
+         super.onResume()
+         audioChildOpen = false
+         Engine.listener = lis
++        lastPlayingState = null
+         if (Engine.active && Engine.isPlaying()) PlaybackService.start(this) else PlaybackService.stop(this)
+         ui.removeCallbacks(controlRgbTick)
+         if (controlRgbTargets.isNotEmpty()) ui.post(controlRgbTick)
+         playerGearAnimator?.cancel()
+         playerSettingsGear?.let { gear ->
+-            if (Prefs.themeMode(this) == "rgb") {
+-                playerGearAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
+-                    duration = 5000L
+-                    repeatCount = ValueAnimator.INFINITE
+-                    interpolator = LinearInterpolator()
+-                    addUpdateListener { gear.rotation = it.animatedValue as Float }
+-                    start()
+-                }
++            playerGearAnimator = ValueAnimator.ofFloat(0f, 360f).apply {
++                duration = 5000L
++                repeatCount = ValueAnimator.INFINITE
++                interpolator = LinearInterpolator()
++                addUpdateListener { gear.rotation = it.animatedValue as Float }
++                start()
+             }
+         }
+         hideBars()

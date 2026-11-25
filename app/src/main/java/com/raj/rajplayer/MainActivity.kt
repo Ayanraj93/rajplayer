@@ -65,10 +65,6 @@ class MainActivity : Activity() {
     private lateinit var miniPlay: TextView
     private var selCountTv: TextView? = null
     private var curAdapter: BaseAdapter? = null
-    private var ytQueryText: String = ""
-    private var ytResults: List<WebMediaItem> = emptyList()
-    private var ytSearching: Boolean = false
-    private var ytStatusText: String = "Search YouTube videos or paste YouTube / Instagram / Facebook link below."
     private var atomic: AtomicView? = null
     private var settingsSv: ScrollView? = null
     private var settingsY = 0
@@ -359,12 +355,9 @@ class MainActivity : Activity() {
     private fun tabBtn(t: String, sel: Boolean, ac: Int, tc: Int, f: () -> Unit): TextView {
         val v = TextView(this)
         v.text = t
-        v.textSize = 12.5f
-        v.maxLines = 1
-        v.setSingleLine(true)
-        v.ellipsize = TextUtils.TruncateAt.END
+        v.textSize = 14f
         v.gravity = Gravity.CENTER
-        v.setPadding(dp(2), dp(10), dp(2), dp(10))
+        v.setPadding(0, dp(10), 0, dp(10))
         if (sel) {
             v.setBackgroundColor(ac)
             v.setTextColor(contrast(ac))
@@ -676,95 +669,20 @@ class MainActivity : Activity() {
 
     private fun streamDialog() {
         val et = EditText(this)
-        et.hint = "Paste YouTube, Instagram, Facebook or http(s):// link"
+        et.hint = "http://... or rtsp://..."
         AlertDialog.Builder(this)
-            .setTitle("Play or Download Link")
+            .setTitle("Network Stream URL")
             .setView(et)
             .setPositiveButton("Play") { _, _ ->
                 val u = et.text.toString().trim()
-                if (u.isNotEmpty()) playResolvedLink(u)
-            }
-            .setNeutralButton("Download") { _, _ ->
-                val u = et.text.toString().trim()
-                if (u.isNotEmpty()) downloadResolvedLink(u)
+                if (u.isNotEmpty()) {
+                    val i = Intent(this, PlayerActivity::class.java)
+                    i.data = Uri.parse(u)
+                    startActivity(i)
+                }
             }
             .setNegativeButton("Cancel", null)
             .show()
-    }
-
-    private fun playResolvedLink(rawUrl: String) {
-        val prog = android.app.ProgressDialog(this).apply {
-            setMessage("Resolving media stream...")
-            setCancelable(true)
-            show()
-        }
-        MediaWebExtractor.resolveAnyUrl(this, rawUrl, preferAudio = false) { resolved, err ->
-            if (prog.isShowing) prog.dismiss()
-            if (resolved != null && resolved.streamUrl.isNotEmpty()) {
-                MediaWebExtractor.setActiveStreamHeaders(resolved.userAgent, resolved.referer)
-                val i = Intent(this, PlayerActivity::class.java).apply {
-                    data = Uri.parse(resolved.streamUrl)
-                    putStringArrayListExtra("names", arrayListOf(resolved.title))
-                    putExtra("idx", 0)
-                }
-                startActivity(i)
-            } else {
-                toast(err ?: "Could not play link")
-            }
-        }
-    }
-
-    private fun downloadResolvedLink(rawUrl: String) {
-        val prog = android.app.ProgressDialog(this).apply {
-            setMessage("Preparing download...")
-            setCancelable(true)
-            show()
-        }
-        MediaWebExtractor.resolveAnyUrl(this, rawUrl, preferAudio = false) { resolved, err ->
-            if (prog.isShowing) prog.dismiss()
-            if (resolved != null && resolved.streamUrl.isNotEmpty()) {
-                MediaWebExtractor.startDownload(this, resolved)
-            } else {
-                toast(err ?: "Could not download link")
-            }
-        }
-    }
-
-    private fun runYouTubeSearch(qText: String) {
-        val trimmed = qText.trim()
-        ytQueryText = trimmed
-        if (trimmed.isEmpty()) {
-            ytResults = emptyList()
-            ytStatusText = "Search YouTube videos or paste YouTube / Instagram / Facebook link."
-            renderList()
-            return
-        }
-        // If user pasted a YT / Insta / FB URL directly into search box, offer direct Play / Download
-        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
-            ytStatusText = "Link detected: tap Play or Download below."
-            renderList()
-            return
-        }
-        ytSearching = true
-        ytStatusText = "Searching YouTube for \"$trimmed\"..."
-        renderList()
-        Thread {
-            try {
-                val found = MediaWebExtractor.searchYouTube(trimmed)
-                runOnUiThread {
-                    ytSearching = false
-                    ytResults = found
-                    ytStatusText = if (found.isEmpty()) "No videos found for \"$trimmed\"." else "${found.size} results for \"$trimmed\""
-                    renderList()
-                }
-            } catch (e: Exception) {
-                runOnUiThread {
-                    ytSearching = false
-                    ytStatusText = "Search error: ${e.message ?: "check network"}"
-                    renderList()
-                }
-            }
-        }.start()
     }
 
     // ================= long-press menu =================
@@ -1349,7 +1267,7 @@ class MainActivity : Activity() {
         navRow.gravity = Gravity.CENTER_VERTICAL
         navRow.setPadding(0, dp(8), 0, dp(8))
         val tabs = LinearLayout(this)
-        val tabNames = arrayOf("Videos", "Folders", "Music", "Playlist", "YouTube")
+        val tabNames = arrayOf("Videos", "Folders", "Music", "Playlist")
         for (i in tabNames.indices) {
             tabs.addView(tabBtn(tabNames[i], tab == i, ac, tc) {
                 tab = i
@@ -1453,98 +1371,6 @@ class MainActivity : Activity() {
             }
         }
 
-        if (tab == 4 && !conversionSelectMode) {
-            val ytBox = LinearLayout(this)
-            ytBox.orientation = LinearLayout.VERTICAL
-            ytBox.setPadding(dp(4), dp(4), dp(4), dp(8))
-
-            val searchBar = LinearLayout(this)
-            searchBar.gravity = Gravity.CENTER_VERTICAL
-            val qInput = EditText(this)
-            qInput.hint = "Search YouTube or paste YT / IG / FB link..."
-            qInput.setTextColor(tc)
-            qInput.setHintTextColor((tc and 0x00FFFFFF) or 0x77000000)
-            qInput.setText(ytQueryText)
-            qInput.setSingleLine(true)
-            searchBar.addView(qInput, LinearLayout.LayoutParams(0, WC, 1f))
-
-            val goBtn = button("Go", ac) {
-                runYouTubeSearch(qInput.text.toString())
-            }
-            searchBar.addView(goBtn)
-            ytBox.addView(searchBar, LinearLayout.LayoutParams(MP, WC))
-
-            val linkRow = LinearLayout(this)
-            linkRow.gravity = Gravity.CENTER_VERTICAL
-            linkRow.setPadding(0, dp(4), 0, dp(4))
-            val pastePlayBtn = button("Play Link", ac) {
-                val link = qInput.text.toString().trim()
-                if (link.isNotEmpty()) playResolvedLink(link) else streamDialog()
-            }
-            val pasteDlBtn = button("Download Link", ac) {
-                val link = qInput.text.toString().trim()
-                if (link.isNotEmpty()) downloadResolvedLink(link) else streamDialog()
-            }
-            val plp = LinearLayout.LayoutParams(0, WC, 1f).apply { rightMargin = dp(6) }
-            val dlp = LinearLayout.LayoutParams(0, WC, 1f).apply { leftMargin = dp(6) }
-            linkRow.addView(pastePlayBtn, plp)
-            linkRow.addView(pasteDlBtn, dlp)
-            ytBox.addView(linkRow, LinearLayout.LayoutParams(MP, WC))
-
-            ytBox.addView(label(ytStatusText, 13f, tc))
-
-            if (ytSearching) {
-                ytBox.addView(label("Loading results...", 14f, ac))
-            } else if (ytResults.isNotEmpty()) {
-                val resScroll = ScrollView(this)
-                val resCol = LinearLayout(this)
-                resCol.orientation = LinearLayout.VERTICAL
-                for (item in ytResults) {
-                    val card = LinearLayout(this)
-                    card.orientation = LinearLayout.VERTICAL
-                    card.setPadding(dp(8), dp(8), dp(8), dp(8))
-                    val cardBg = GradientDrawable().apply {
-                        setColor(0x22FFFFFF)
-                        setStroke(dp(1), (ac and 0x00FFFFFF) or 0x55000000)
-                        cornerRadius = dp(10).toFloat()
-                    }
-                    card.background = cardBg
-                    val clp = LinearLayout.LayoutParams(MP, WC).apply { bottomMargin = dp(8) }
-
-                    val titleTv = TextView(this)
-                    titleTv.text = item.title
-                    titleTv.textSize = 14f
-                    titleTv.setTypeface(null, Typeface.BOLD)
-                    titleTv.setTextColor(tc)
-                    titleTv.maxLines = 2
-                    titleTv.ellipsize = TextUtils.TruncateAt.END
-                    card.addView(titleTv)
-
-                    val metaTv = TextView(this)
-                    val durTxt = if (item.durationSec > 0L) durStr(item.durationSec * 1000L) else "Live/Clip"
-                    metaTv.text = "${item.uploader}  •  $durTxt"
-                    metaTv.textSize = 12f
-                    metaTv.setTextColor(Color.parseColor("#AAB4C3"))
-                    metaTv.setPadding(0, dp(2), 0, dp(6))
-                    card.addView(metaTv)
-
-                    val actRow = LinearLayout(this)
-                    val bPlay = button("Play", ac) { playResolvedLink(item.url) }
-                    val bDl = button("Download", ac) { downloadResolvedLink(item.url) }
-                    actRow.addView(bPlay, LinearLayout.LayoutParams(0, WC, 1f).apply { rightMargin = dp(6) })
-                    actRow.addView(bDl, LinearLayout.LayoutParams(0, WC, 1f).apply { leftMargin = dp(6) })
-                    card.addView(actRow)
-
-                    resCol.addView(card, clp)
-                }
-                resScroll.addView(resCol)
-                ytBox.addView(resScroll, LinearLayout.LayoutParams(MP, 0, 1f))
-            }
-
-            listHolder.addView(ytBox, LinearLayout.LayoutParams(MP, MP))
-            return
-        }
-
         if (items.isEmpty()) {
             val emptyMsg = when {
                 loading -> "Loading..."
@@ -1563,11 +1389,7 @@ class MainActivity : Activity() {
         col.orientation = LinearLayout.VERTICAL
         if (of != null && q.isEmpty() && tab != 2 && tab != 3) col.addView(label("\uD83D\uDCC1 " + folderName(of), 15f, tc))
 
-        if ((tab == 0 || tab == 1) && !hasVideoPerm()) {
-            col.addView(button("Allow All Videos (Full Storage Access)", ac) {
-                if (hasLimitedVisualPerm()) openAppSettings() else reqPerms()
-            })
-        }
+        if ((tab == 0 || tab == 1) && !hasVideoPerm()) col.addView(button("Allow All Videos (Full Storage Access)", ac) { if (hasLimitedVisualPerm()) openAppSettings() else reqPerms() })
         val lv = ListView(this)
         lv.divider = null
         val ad = makeAdapter(items, tc, ac)

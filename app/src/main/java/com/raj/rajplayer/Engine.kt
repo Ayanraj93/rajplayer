@@ -168,15 +168,6 @@ object Engine {
             .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
         val exo = ExoPlayer.Builder(app, renderers)
-            .setMediaSourceFactory(
-                androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
-                    androidx.media3.datasource.DefaultDataSource.Factory(
-                        app, renderers,
-                        MediaWebExtractor.sharedHttpFactory
-                    )
-                )
-            )
-            )
             .setLoadControl(loadControl)
             .setAudioAttributes(mediaAudioAttrs, false)
             .setWakeMode(androidx.media3.common.C.WAKE_MODE_LOCAL)
