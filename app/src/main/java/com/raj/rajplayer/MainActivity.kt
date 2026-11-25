@@ -1005,7 +1005,6 @@ class MainActivity : Activity() {
 
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
-        if ((tab == 0 || tab == 1) && !hasVideoPerm()) col.addView(button("Allow All Videos (Full Storage Access)", ac) { if (hasLimitedVisualPerm()) openAppSettings() else reqPerms() })
         col.setPadding(dp(12), 0, 0, 0)
         val title = RgbTextView(this)
         title.textSize = 14f
@@ -1564,6 +1563,11 @@ class MainActivity : Activity() {
         col.orientation = LinearLayout.VERTICAL
         if (of != null && q.isEmpty() && tab != 2 && tab != 3) col.addView(label("\uD83D\uDCC1 " + folderName(of), 15f, tc))
 
+        if ((tab == 0 || tab == 1) && !hasVideoPerm()) {
+            col.addView(button("Allow All Videos (Full Storage Access)", ac) {
+                if (hasLimitedVisualPerm()) openAppSettings() else reqPerms()
+            })
+        }
         val lv = ListView(this)
         lv.divider = null
         val ad = makeAdapter(items, tc, ac)
