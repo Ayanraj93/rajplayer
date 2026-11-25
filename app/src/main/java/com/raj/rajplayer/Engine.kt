@@ -170,12 +170,12 @@ object Engine {
         val exo = ExoPlayer.Builder(app, renderers)
             .setMediaSourceFactory(
                 androidx.media3.exoplayer.source.DefaultMediaSourceFactory(
-                    androidx.media3.datasource.DefaultHttpDataSource.Factory()
-                        .setUserAgent(MediaWebExtractor.MOBILE_CHROME_UA)
-                        .setAllowCrossProtocolRedirects(true)
-                        .setConnectTimeoutMs(15_000)
-                        .setReadTimeoutMs(25_000)
+                    androidx.media3.datasource.DefaultDataSource.Factory(
+                        app, renderers,
+                        MediaWebExtractor.sharedHttpFactory
+                    )
                 )
+            )
             )
             .setLoadControl(loadControl)
             .setAudioAttributes(mediaAudioAttrs, false)

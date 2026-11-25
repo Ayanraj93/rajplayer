@@ -698,6 +698,7 @@ class MainActivity : Activity() {
         MediaWebExtractor.resolveAnyUrl(this, rawUrl, preferAudio = false) { resolved, err ->
             if (prog.isShowing) prog.dismiss()
             if (resolved != null && resolved.streamUrl.isNotEmpty()) {
+                MediaWebExtractor.setActiveStreamHeaders(resolved.userAgent, resolved.referer)
                 val i = Intent(this, PlayerActivity::class.java).apply {
                     data = Uri.parse(resolved.streamUrl)
                     putStringArrayListExtra("names", arrayListOf(resolved.title))

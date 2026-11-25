@@ -17,6 +17,7 @@ import android.webkit.WebResourceResponse
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.Toast
+import androidx.media3.datasource.DefaultHttpDataSource
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -54,12 +55,31 @@ data class ResolvedStream(
 object MediaWebExtractor {
     const val MOBILE_CHROME_UA =
         "Mozilla/5.0 (Linux; Android 14; Pixel 8) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Mobile Safari/537.36"
+    private const val VISIONOS_UA =
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 15_0) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.0 Safari/605.1.15"
     private const val ANDROID_VR_UA =
-        "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
+        "com.google.android.apps.youtube.vr.oculus/1.65.10 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip"
     private const val IOS_YT_UA =
         "com.google.ios.youtube/19.45.4 (iPhone16,2; U; CPU iOS 18_1_0 like Mac OS X; en_IN)"
 
+    val sharedHttpFactory: DefaultHttpDataSource.Factory = DefaultHttpDataSource.Factory()
+        .setUserAgent(MOBILE_CHROME_UA)
+        .setAllowCrossProtocolRedirects(true)
+        .setConnectTimeoutMs(15_000)
+        .setReadTimeoutMs(25_000)
+
+    fun setActiveStreamHeaders(userAgent: String, referer: String = "") {
+        sharedHttpFactory.setUserAgent(userAgent.ifBlank { MOBILE_CHROME_UA })
+        if (referer.isNotBlank()) {
+            sharedHttpFactory.setDefaultRequestProperties(mapOf("Referer" to referer))
+        } else {
+            sharedHttpFactory.setDefaultRequestProperties(emptyMap())
+        }
+    }
+
     private var initialized = false
+    @Volatile
+    private var cachedVisitorData: String? = null
 
     private val httpClient: OkHttpClient by lazy {
         OkHttpClient.Builder()
@@ -180,15 +200,40 @@ object MediaWebExtractor {
         return out
     }
 
+    private fun fetchVisitorData(): String? {
+        cachedVisitorData?.let { if (it.isNotBlank()) return it }
+        try {
+            val req = Request.Builder()
+                .url("https://www.youtube.com/sw.js_data")
+                .header("User-Agent", MOBILE_CHROME_UA)
+                .header("Accept-Language", "en-IN,en;q=0.9")
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                val text = resp.body?.string() ?: ""
+                val m = Regex("\"visitorData\"\\s*:\\s*\"([^\"]+)\"").find(text)
+                val vd = m?.groupValues?.getOrNull(1)
+                if (!vd.isNullOrBlank()) {
+                    cachedVisitorData = vd
+                    return vd
+                }
+            }
+        } catch (_: Exception) {
+        }
+        return null
+    }
+
     private fun queryInnerTubePlayer(
         videoId: String,
-        clientName: String,
         clientId: String,
         clientVersion: String,
         userAgent: String,
         clientObj: JSONObject,
         preferAudio: Boolean
     ): ResolvedStream? {
+        val visitorData = fetchVisitorData()
+        if (!visitorData.isNullOrBlank()) {
+            clientObj.put("visitorData", visitorData)
+        }
         val contextObj = JSONObject().apply {
             put("client", clientObj)
         }
@@ -203,13 +248,18 @@ object MediaWebExtractor {
             put("racyCheckOk", true)
         }
 
-        val req = Request.Builder()
+        val reqBuilder = Request.Builder()
             .url("https://www.youtube.com/youtubei/v1/player?prettyPrint=false")
             .header("User-Agent", userAgent)
             .header("Content-Type", "application/json")
             .header("X-YouTube-Client-Name", clientId)
             .header("X-YouTube-Client-Version", clientVersion)
             .header("Origin", "https://www.youtube.com")
+            .header("Referer", "https://www.youtube.com/watch?v=$videoId")
+        if (!visitorData.isNullOrBlank()) {
+            reqBuilder.header("X-Goog-Visitor-Id", visitorData)
+        }
+        val req = reqBuilder
             .post(payload.toString().toByteArray(Charsets.UTF_8).toRequestBody("application/json; charset=utf-8".toMediaTypeOrNull()))
             .build()
 
@@ -268,48 +318,17 @@ object MediaWebExtractor {
             }
 
             if (preferAudio && !bestAudioUrl.isNullOrBlank()) {
-                return ResolvedStream(
-                    title = title,
-                    streamUrl = bestAudioUrl,
-                    audioUrl = bestAudioUrl,
-                    isAudioOnly = true,
-                    userAgent = userAgent,
-                    referer = "https://www.youtube.com/"
-                )
+                return ResolvedStream(title, bestAudioUrl, bestAudioUrl, true, userAgent, "https://www.youtube.com/")
             }
-
             if (!bestProgUrl.isNullOrBlank()) {
-                return ResolvedStream(
-                    title = title,
-                    streamUrl = bestProgUrl,
-                    audioUrl = bestAudioUrl,
-                    isAudioOnly = false,
-                    userAgent = userAgent,
-                    referer = "https://www.youtube.com/"
-                )
+                return ResolvedStream(title, bestProgUrl, bestAudioUrl, false, userAgent, "https://www.youtube.com/")
             }
-
             val hlsUrl = streaming.optString("hlsManifestUrl")
             if (hlsUrl.isNotBlank()) {
-                return ResolvedStream(
-                    title = title,
-                    streamUrl = hlsUrl,
-                    audioUrl = bestAudioUrl,
-                    isAudioOnly = false,
-                    userAgent = userAgent,
-                    referer = "https://www.youtube.com/"
-                )
+                return ResolvedStream(title, hlsUrl, bestAudioUrl, false, userAgent, "https://www.youtube.com/")
             }
-
             if (!bestAdaptiveVideoUrl.isNullOrBlank()) {
-                return ResolvedStream(
-                    title = title,
-                    streamUrl = bestAdaptiveVideoUrl,
-                    audioUrl = bestAudioUrl,
-                    isAudioOnly = false,
-                    userAgent = userAgent,
-                    referer = "https://www.youtube.com/"
-                )
+                return ResolvedStream(title, bestAdaptiveVideoUrl, bestAudioUrl, false, userAgent, "https://www.youtube.com/")
             }
             return null
         }
@@ -318,11 +337,28 @@ object MediaWebExtractor {
     fun resolveYouTubeViaInnerTube(pageUrl: String, preferAudio: Boolean = false): ResolvedStream? {
         val videoId = extractYouTubeVideoId(pageUrl) ?: return null
 
-        // 1. Try ANDROID_VR client (returns clean progressive MP4 + adaptive URLs without reload error)
+        // 1. VISIONOS client (returns full-length progressive MP4 URLs without PO token)
+        try {
+            val visionClient = JSONObject().apply {
+                put("clientName", "VISIONOS")
+                put("clientVersion", "0.1")
+                put("deviceMake", "Apple")
+                put("deviceModel", "RealityDevice14,1")
+                put("osName", "visionOS")
+                put("osVersion", "2.0")
+                put("hl", "en")
+                put("gl", "IN")
+            }
+            val r0 = queryInnerTubePlayer(videoId, "101", "0.1", VISIONOS_UA, visionClient, preferAudio)
+            if (r0 != null) return r0
+        } catch (_: Exception) {
+        }
+
+        // 2. ANDROID_VR 1.65.10 client
         try {
             val vrClient = JSONObject().apply {
                 put("clientName", "ANDROID_VR")
-                put("clientVersion", "1.60.19")
+                put("clientVersion", "1.65.10")
                 put("deviceMake", "Oculus")
                 put("deviceModel", "Quest 3")
                 put("androidSdkVersion", 32)
@@ -331,12 +367,12 @@ object MediaWebExtractor {
                 put("hl", "en")
                 put("gl", "IN")
             }
-            val r1 = queryInnerTubePlayer(videoId, "ANDROID_VR", "28", "1.60.19", ANDROID_VR_UA, vrClient, preferAudio)
+            val r1 = queryInnerTubePlayer(videoId, "28", "1.65.10", ANDROID_VR_UA, vrClient, preferAudio)
             if (r1 != null) return r1
         } catch (_: Exception) {
         }
 
-        // 2. Try IOS client
+        // 3. IOS client
         try {
             val iosClient = JSONObject().apply {
                 put("clientName", "IOS")
@@ -348,20 +384,20 @@ object MediaWebExtractor {
                 put("hl", "en")
                 put("gl", "IN")
             }
-            val r2 = queryInnerTubePlayer(videoId, "IOS", "5", "19.45.4", IOS_YT_UA, iosClient, preferAudio)
+            val r2 = queryInnerTubePlayer(videoId, "5", "19.45.4", IOS_YT_UA, iosClient, preferAudio)
             if (r2 != null) return r2
         } catch (_: Exception) {
         }
 
-        // 3. Try TVHTML5_SIMPLY_EMBEDDED_PLAYER client
+        // 4. MWEB client
         try {
-            val tvClient = JSONObject().apply {
-                put("clientName", "TVHTML5_SIMPLY_EMBEDDED_PLAYER")
-                put("clientVersion", "2.0")
+            val mwebClient = JSONObject().apply {
+                put("clientName", "MWEB")
+                put("clientVersion", "2.20260205.04.01")
                 put("hl", "en")
                 put("gl", "IN")
             }
-            val r3 = queryInnerTubePlayer(videoId, "TVHTML5_SIMPLY_EMBEDDED_PLAYER", "85", "2.0", MOBILE_CHROME_UA, tvClient, preferAudio)
+            val r3 = queryInnerTubePlayer(videoId, "2", "2.20260205.04.01", MOBILE_CHROME_UA, mwebClient, preferAudio)
             if (r3 != null) return r3
         } catch (_: Exception) {
         }
@@ -383,7 +419,7 @@ object MediaWebExtractor {
         context: Context,
         pageUrl: String,
         isYouTubeFallback: Boolean = false,
-        timeoutMs: Long = 15_000L,
+        timeoutMs: Long = 16_000L,
         onResult: (ResolvedStream?, String?) -> Unit
     ) {
         val mainHandler = Handler(Looper.getMainLooper())
@@ -392,6 +428,7 @@ object MediaWebExtractor {
             var foundVideoUrl: String? = null
             var foundAudioUrl: String? = null
             var foundTitle = if (isYouTubeFallback) "YouTube Video" else "Social Video"
+            var switchedToMobileWatch = false
 
             val webView = WebView(context.applicationContext)
             val settings = webView.settings
@@ -429,11 +466,11 @@ object MediaWebExtractor {
                     val clean = stripRangeParams(rawUrl)
                     if (low.contains("mime=audio") || low.contains("mime%3daudio")) {
                         foundAudioUrl = clean
-                    } else if (low.contains("mime=video") || low.contains("mime%3dvideo") || low.contains("itag=18") || low.contains("itag=22")) {
+                    } else {
                         foundVideoUrl = clean
-                        if (low.contains("itag=18") || low.contains("itag=22")) {
+                        if (low.contains("itag=18") || low.contains("itag=22") || low.contains("mime=video%2fmp4") || low.contains("mime=video/mp4")) {
                             finishOnce(
-                                ResolvedStream(foundTitle, clean, foundAudioUrl, false, MOBILE_CHROME_UA, "https://m.youtube.com/"),
+                                ResolvedStream(foundTitle, clean, foundAudioUrl, false, MOBILE_CHROME_UA, "https://www.youtube.com/"),
                                 null
                             )
                         }
@@ -460,10 +497,14 @@ object MediaWebExtractor {
                     webView.evaluateJavascript(
                         """
                         (function() {
-                            var btns = document.querySelectorAll('button, [role="button"]');
+                            var bodyTxt = (document.body && document.body.innerText) ? document.body.innerText : '';
+                            if (bodyTxt.indexOf('Video unavailable') >= 0 || bodyTxt.indexOf('Playback on other websites') >= 0) {
+                                return 'EMBED_BLOCKED';
+                            }
+                            var btns = document.querySelectorAll('button, [role="button"], .ytp-large-play-button');
                             for (var b = 0; b < btns.length; b++) {
                                 var txt = (btns[b].innerText || btns[b].getAttribute('aria-label') || '').toLowerCase();
-                                if (txt === 'play' || txt.indexOf('play video') >= 0 || txt.indexOf('unmute') >= 0) {
+                                if (btns[b].classList.contains('ytp-large-play-button') || txt === 'play' || txt.indexOf('play video') >= 0) {
                                     try { btns[b].click(); } catch(e) {}
                                 }
                             }
@@ -483,11 +524,19 @@ object MediaWebExtractor {
                     ) { res ->
                         if (finished) return@evaluateJavascript
                         val cleaned = (res ?: "").trim('"').replace("\\/", "/")
-                        if (cleaned.isNotEmpty() && !cleaned.startsWith("blob:")) {
+                        if (cleaned == "EMBED_BLOCKED" && isYouTubeFallback && !switchedToMobileWatch) {
+                            switchedToMobileWatch = true
+                            val vidId = extractYouTubeVideoId(pageUrl)
+                            if (vidId != null) {
+                                webView.loadUrl("https://m.youtube.com/watch?v=$vidId")
+                            }
+                            return@evaluateJavascript
+                        }
+                        if (cleaned.isNotEmpty() && cleaned != "EMBED_BLOCKED" && !cleaned.startsWith("blob:")) {
                             evaluateCandidate(cleaned, currentTitle)
                         }
                     }
-                    mainHandler.postDelayed(this, 900L)
+                    mainHandler.postDelayed(this, 850L)
                 }
             }
 
@@ -533,12 +582,13 @@ object MediaWebExtractor {
                 }
             }
 
-            mainHandler.postDelayed(pollJsRunnable, 1200L)
+            mainHandler.postDelayed(pollJsRunnable, 1000L)
             mainHandler.postDelayed(timeoutRunnable, timeoutMs)
             try {
                 val targetUrl = if (isYouTubeFallback) {
                     val vidId = extractYouTubeVideoId(pageUrl)
-                    if (vidId != null) "https://m.youtube.com/watch?v=$vidId" else pageUrl.trim()
+                    if (vidId != null) "https://www.youtube.com/embed/$vidId?autoplay=1&mute=1&playsinline=1"
+                    else pageUrl.trim()
                 } else {
                     pageUrl.trim()
                 }
@@ -567,13 +617,12 @@ object MediaWebExtractor {
                     if (innerTubeResult != null) {
                         activity.runOnUiThread { onResult(innerTubeResult, null) }
                     } else {
-                        // Automatic Stage-2 fallback: silent mobile WebView sniffer
-                        sniffWebMedia(activity, trimmed, isYouTubeFallback = true, timeoutMs = 15_000L, onResult = onResult)
+                        sniffWebMedia(activity, trimmed, isYouTubeFallback = true, timeoutMs = 16_000L, onResult = onResult)
                     }
                 }.start()
             }
             "instagram", "facebook" -> {
-                sniffWebMedia(activity, trimmed, isYouTubeFallback = false, timeoutMs = 15_000L, onResult = onResult)
+                sniffWebMedia(activity, trimmed, isYouTubeFallback = false, timeoutMs = 16_000L, onResult = onResult)
             }
             else -> {
                 onResult(
