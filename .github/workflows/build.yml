@@ -82,19 +82,20 @@ jobs:
       - name: Verify Media3 engine source
         run: bash ./verify_media3_engine.sh
 
-      - name: Build debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+      - name: Build slim release APK
+        run: gradle assembleRelease --no-daemon --stacktrace
 
-      - name: Verify MP3 encoder ABIs
+      - name: Verify MP3 encoder ABIs and APK size
         run: |
-          APK="app/build/outputs/apk/debug/app-debug.apk"
+          APK="app/build/outputs/apk/release/app-release.apk"
+          ls -lh "$APK"
           unzip -l "$APK" | grep -q "lib/armeabi-v7a/librajplayer_mp3.so"
           unzip -l "$APK" | grep -q "lib/arm64-v8a/librajplayer_mp3.so"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: RajPlayer-Media3-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: RajPlayer-Media3-slim-apk
+          path: app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
 
