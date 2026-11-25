@@ -178,7 +178,7 @@ class MainActivity : Activity() {
     }
 
     override fun onPause() {
-        permissionGrantedAtPause = hasFullMediaPerm()
+        permissionGrantedAtPause = hasFullMediaPerm() && hasAllFilesAccess()
         stopSettingsGearAnimation()
         super.onPause()
         ui.removeCallbacks(miniTick)
@@ -294,7 +294,21 @@ class MainActivity : Activity() {
     private fun hasLimitedVisualPerm() = Build.VERSION.SDK_INT >= 34 &&
         checkSelfPermission("android.permission.READ_MEDIA_VISUAL_USER_SELECTED") == PackageManager.PERMISSION_GRANTED
     private fun hasFullMediaPerm() = hasVideoPerm() && hasAudioPerm()
-    private fun hasPerm() = hasVideoPerm() || hasAudioPerm() || hasLimitedVisualPerm()
+    private fun hasAllFilesAccess(): Boolean =
+        if (Build.VERSION.SDK_INT >= 30) android.os.Environment.isExternalStorageManager() else hasVideoPerm()
+
+    private fun openAllFilesSettings() {
+        try {
+            val i = Intent(android.provider.Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION)
+            i.data = Uri.parse("package:$packageName")
+            startActivity(i)
+        } catch (_: Exception) {
+            try { startActivity(Intent(android.provider.Settings.ACTION_MANAGE_ALL_FILES_ACCESS_PERMISSION)) }
+            catch (_: Exception) { openAppSettings() }
+        }
+    }
+
+    private fun hasPerm() = hasVideoPerm() || hasAudioPerm() || hasLimitedVisualPerm() || hasAllFilesAccess()
 
     private fun reqPerms() {
         val l = ArrayList<String>()
@@ -313,7 +327,7 @@ class MainActivity : Activity() {
 
     private fun toast(s: String) = Toast.makeText(this, s, Toast.LENGTH_SHORT).show()
     private fun contrast(c: Int) = if (Color.luminance(c) > 0.5f) Color.BLACK else Color.WHITE
-    private fun isAudio(u: Uri) = u.toString().contains("/audio/")
+    private fun isAudio(u: Uri) = if (u.scheme == "file") { val p = (u.path ?: "").lowercase(); p.endsWith(".mp3") || p.endsWith(".m4a") || p.endsWith(".aac") || p.endsWith(".wav") || p.endsWith(".ogg") || p.endsWith(".flac") || p.endsWith(".opus") } else u.toString().contains("/audio/")
 
     private fun label(t: String, size: Float, color: Int): TextView {
         val v = TextView(this)
@@ -528,6 +542,95 @@ class MainActivity : Activity() {
                     .thenBy { it.dur }
                     .thenBy { it.date }
             ) ?: copies.first() }
+        if (video) {
+            val vidExts = setOf("mp4", "mkv", "webm", "avi", "mov", "m4v", "flv", "ts", "m2ts", "3gp", "wmv", "mpg", "mpeg", "ogv", "vob", "f4v")
+            val seenKey = HashSet<String>()
+            for (v in out) seenKey.add((v.folder.trim('/') + "/" + v.name).lowercase(java.util.Locale.ROOT))
+            val seenNameSize = HashSet<String>()
+            for (v in out) seenNameSize.add(v.name.lowercase(java.util.Locale.ROOT) + "|" + v.size)
+
+            // Pass 2: MediaStore.Files for MKV/WebM/TS files skipped by MediaStore.Video
+            try {
+                val filesUri = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL)
+                val fProj = arrayOf(
+                    MediaStore.MediaColumns._ID,
+                    MediaStore.MediaColumns.DISPLAY_NAME,
+                    MediaStore.MediaColumns.DURATION,
+                    MediaStore.MediaColumns.SIZE,
+                    MediaStore.MediaColumns.RELATIVE_PATH,
+                    MediaStore.MediaColumns.DATE_ADDED,
+                    MediaStore.MediaColumns.WIDTH,
+                    MediaStore.MediaColumns.HEIGHT
+                )
+                contentResolver.query(filesUri, fProj, MediaStore.MediaColumns.SIZE + " > 4096", null, null)?.use { c ->
+                    val idC = c.getColumnIndexOrThrow(MediaStore.MediaColumns._ID)
+                    val nmC = c.getColumnIndex(MediaStore.MediaColumns.DISPLAY_NAME)
+                    val duC = c.getColumnIndex(MediaStore.MediaColumns.DURATION)
+                    val szC = c.getColumnIndex(MediaStore.MediaColumns.SIZE)
+                    val paC = c.getColumnIndex(MediaStore.MediaColumns.RELATIVE_PATH)
+                    val dtC = c.getColumnIndex(MediaStore.MediaColumns.DATE_ADDED)
+                    val wC = c.getColumnIndex(MediaStore.MediaColumns.WIDTH)
+                    val hC = c.getColumnIndex(MediaStore.MediaColumns.HEIGHT)
+                    while (c.moveToNext()) {
+                        val nm = if (nmC >= 0) c.getString(nmC) ?: continue else continue
+                        val ext = nm.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
+                        if (ext !in vidExts) continue
+                        val fld = if (paC >= 0) c.getString(paC) ?: "" else ""
+                        val sz = if (szC >= 0) c.getLong(szC) else 0L
+                        val k1 = (fld.trim('/') + "/" + nm).lowercase(java.util.Locale.ROOT)
+                        val k2 = nm.lowercase(java.util.Locale.ROOT) + "|" + sz
+                        if (k1 in seenKey || k2 in seenNameSize) continue
+                        seenKey.add(k1); seenNameSize.add(k2)
+                        out.add(V(
+                            nm,
+                            ContentUris.withAppendedId(filesUri, c.getLong(idC)),
+                            if (duC >= 0) c.getLong(duC) else 0L,
+                            sz, fld,
+                            if (dtC >= 0) c.getLong(dtC) else 0L,
+                            if (wC >= 0) c.getInt(wC) else 0,
+                            if (hC >= 0) c.getInt(hC) else 0
+                        ))
+                    }
+                }
+            } catch (_: Exception) {}
+
+            // Pass 3: Direct filesystem scan when All Files Access is granted
+            if (hasAllFilesAccess()) {
+                try {
+                    val rootDir = android.os.Environment.getExternalStorageDirectory()
+                    val rootPrefix = rootDir.absolutePath.trimEnd('/') + "/"
+                    val toScan = ArrayList<String>()
+                    val stack = ArrayDeque<java.io.File>()
+                    stack.add(rootDir)
+                    while (stack.isNotEmpty()) {
+                        val dir = stack.removeLast()
+                        val kids = dir.listFiles() ?: continue
+                        for (f in kids) {
+                            val fn = f.name
+                            if (f.isDirectory) {
+                                if (fn.startsWith(".")) continue
+                                val rel = f.absolutePath.removePrefix(rootPrefix)
+                                if (rel.equals("Android/data", true) || rel.equals("Android/obb", true)) continue
+                                stack.add(f)
+                            } else if (f.isFile && f.length() > 4096L) {
+                                val ext = fn.substringAfterLast('.', "").lowercase(java.util.Locale.ROOT)
+                                if (ext !in vidExts) continue
+                                val parentRel = (f.parentFile?.absolutePath ?: "").removePrefix(rootPrefix).trim('/')
+                                val k1 = (parentRel + "/" + fn).lowercase(java.util.Locale.ROOT)
+                                val k2 = fn.lowercase(java.util.Locale.ROOT) + "|" + f.length()
+                                if (k1 in seenKey || k2 in seenNameSize) continue
+                                seenKey.add(k1); seenNameSize.add(k2)
+                                out.add(V(fn, Uri.fromFile(f), 0L, f.length(), if (parentRel.isEmpty()) "" else parentRel + "/", f.lastModified() / 1000L, 0, 0))
+                                if (toScan.size < 40) toScan.add(f.absolutePath)
+                            }
+                        }
+                    }
+                    if (toScan.isNotEmpty()) {
+                        android.media.MediaScannerConnection.scanFile(applicationContext, toScan.toTypedArray(), null, null)
+                    }
+                } catch (_: Exception) {}
+            }
+        }
         return sortList(unique)
     }
 
@@ -1078,28 +1181,8 @@ class MainActivity : Activity() {
     }
 
     private fun loadMediaThumb(u: Uri): Bitmap? {
-        try { contentResolver.loadThumbnail(u, Size(320, 180), null)?.let { return it } } catch (_: Exception) {}
-        val mmr = android.media.MediaMetadataRetriever()
-        return try {
-            mmr.setDataSource(this, u)
-            if (isAudio(u)) mmr.embeddedPicture?.let { android.graphics.BitmapFactory.decodeByteArray(it, 0, it.size) }
-            else {
-                var bmp: Bitmap? = if (Build.VERSION.SDK_INT >= 27) {
-                    try { mmr.getScaledFrameAtTime(1_000_000L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 320, 180) } catch (_: Exception) { null }
-                        ?: try { mmr.getScaledFrameAtTime(0L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC, 320, 180) } catch (_: Exception) { null }
-                } else null
-                if (bmp == null) {
-                    val raw = try { mmr.getFrameAtTime(1_000_000L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC) ?: mmr.getFrameAtTime(0L, android.media.MediaMetadataRetriever.OPTION_CLOSEST_SYNC) } catch (_: Exception) { null }
-                    if (raw != null) {
-                        val sc = minOf(320f / raw.width.coerceAtLeast(1), 180f / raw.height.coerceAtLeast(1), 1f)
-                        val tw = (raw.width * sc).toInt().coerceAtLeast(1)
-                        val th = (raw.height * sc).toInt().coerceAtLeast(1)
-                        bmp = if (tw < raw.width || th < raw.height) Bitmap.createScaledBitmap(raw, tw, th, true).also { if (it !== raw) raw.recycle() } else raw
-                    }
-                }
-                bmp
-            }
-        } catch (_: Exception) { null } finally { try { mmr.release() } catch (_: Exception) {} }
+        val dur = videos.firstOrNull { it.uri == u }?.dur ?: 0L
+        return Media3ThumbExtractor.extract(this, u, isAudio(u), dur)
     }
 
     // ================= mini player =================
@@ -1390,6 +1473,7 @@ class MainActivity : Activity() {
         if (of != null && q.isEmpty() && tab != 2 && tab != 3) col.addView(label("\uD83D\uDCC1 " + folderName(of), 15f, tc))
 
         if ((tab == 0 || tab == 1) && !hasVideoPerm()) col.addView(button("Allow All Videos (Full Storage Access)", ac) { if (hasLimitedVisualPerm()) openAppSettings() else reqPerms() })
+        if ((tab == 0 || tab == 1) && Build.VERSION.SDK_INT >= 30 && !hasAllFilesAccess()) col.addView(button("Allow All Files Access (Show All 4K / MKV Videos)", ac) { openAllFilesSettings() })
         val lv = ListView(this)
         lv.divider = null
         val ad = makeAdapter(items, tc, ac)
