@@ -162,19 +162,7 @@ object SpeedPanel {
         box.addView(autoBtn)
 
         var dlgRef: AlertDialog? = null
-        val decBtn = Button(a)
-        decBtn.text = "Decoder: " + Tuning.decLabel(Tuning.decMode(a))
-        decBtn.setOnClickListener {
-            dlgRef?.dismiss()
-            onDecoder()
-        }
-        box.addView(decBtn)
 
-        val tip = TextView(a)
-        tip.text = "Media3 uses Android MediaCodec and its playback clock. Auto-Fix monitors dropped frames and avoids disruptive decoder reloads or speed changes."
-        tip.setTextColor(0xCCFFFFFF.toInt())
-        tip.textSize = 11f
-        box.addView(tip)
 
         val sv = ScrollView(a)
         sv.addView(box)

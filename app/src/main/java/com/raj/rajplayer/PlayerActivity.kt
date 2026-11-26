@@ -724,20 +724,23 @@ open class PlayerActivity : Activity() {
     private fun applyHdrWindow() {
         if (Engine.items.isEmpty()) return
         val inf = VideoInfo.cached(Engine.cur())
-        ColorGrade.hdrWindow(this, inf != null && inf.hdr != "SDR" && !ColorGrade.on(this))
+        val isHdrVideo = inf != null && inf.hdr != "SDR"
+        val enableHdr = (isHdrVideo && !ColorGrade.on(this)) || ColorGrade.hdrPeak(this)
+        ColorGrade.hdrWindow(this, enableHdr)
     }
 
     private fun openGrade() {
         val inf = if (Engine.items.isEmpty()) null else VideoInfo.cached(Engine.cur())
-        val hdr = inf?.hdr ?: "unknown"
-        val note = "This video: " + hdr + "   |   Screen HDR: " +
-                (if (ColorGrade.hdrSupported(this)) "supported" else "not supported") +
-                "\nGrading runs on a TextureView (SDR). Turn it OFF to use the native surface (HDR passthrough where the device allows)."
+        val hdr = inf?.hdr ?: "SDR"
+        val note = "Video: " + hdr + "   |   Display HDR: " +
+                (if (ColorGrade.hdrSupported(this)) "Supported" else "Standard") +
+                "\nChoose Natural/Vivid/Ultra HDR+ presets or keep Engine OFF for Native HDR Passthrough."
         ColorGrade.dialog(this, note, {
             attachVideo()
             applyHdrWindow()
         }, {
             ColorGrade.apply(this, layout)
+            applyHdrWindow()
         })
     }
 
@@ -940,12 +943,11 @@ open class PlayerActivity : Activity() {
         else "A-B Repeat: clear"
         val opts = arrayOf(
             "Speed (ruler)  " + rateLabel(rate),
-            "Decoder: " + Tuning.decLabel(Tuning.decMode(this)),
             "Smart auto-fix: " + onOff(Tuning.autoFix(this)),
             "Equalizer Presets",
             "Audio Boost (up to 200%)",
             "Sleep Timer",
-            "Colour Grading / HDR",
+            "HDR & Colour Grading",
             "Audio Sync (delay)",
             "Video Info",
             "Load External Subtitle",
@@ -962,7 +964,7 @@ open class PlayerActivity : Activity() {
         val dlg = AlertDialog.Builder(this)
             .setTitle("Options")
             .setItems(opts) { _, i ->
-                when (i) {
+                when (if (i >= 1) i + 1 else i) {
                     0 -> openSpeed()
                     1 -> decoderDialog()
                     2 -> {
