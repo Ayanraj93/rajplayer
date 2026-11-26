@@ -103,7 +103,21 @@ class MainActivity : Activity() {
 
     private val ui = Handler(Looper.getMainLooper())
     private val cache = LruCache<String, Bitmap>(240)
-    private val pool = Executors.newFixedThreadPool(4)
+    private fun makeLifoPool(threads: Int): java.util.concurrent.ThreadPoolExecutor {
+        val q = object : java.util.concurrent.LinkedBlockingDeque<Runnable>() {
+            override fun offer(e: Runnable): Boolean = offerFirst(e)
+            override fun take(): Runnable = takeFirst()
+            override fun poll(): Runnable? = pollFirst()
+        }
+        return java.util.concurrent.ThreadPoolExecutor(threads, threads, 0L, java.util.concurrent.TimeUnit.MILLISECONDS, q)
+    }
+    private val pool = makeLifoPool(4)
+    private val av1ThumbPool = makeLifoPool(1)
+    private val prewarmPool = Executors.newSingleThreadExecutor()
+    private val prewarmGen = java.util.concurrent.atomic.AtomicInteger(0)
+    private val fastInFlight = java.util.Collections.synchronizedSet(HashSet<String>())
+    private val av1InFlight = java.util.Collections.synchronizedSet(HashSet<String>())
+    private val boundThumbs = java.util.WeakHashMap<ImageView, String>()
     private val loader = Executors.newSingleThreadExecutor()
 
     private val palette = listOf(
@@ -665,6 +679,7 @@ class MainActivity : Activity() {
                 val freshAudios = queryMedia(false)
                 videos = freshVideos
                 audios = freshAudios
+                prewarmAllThumbnails(freshVideos)
             } catch (e: Exception) {
                 error = e
             } finally {
@@ -1195,25 +1210,46 @@ class MainActivity : Activity() {
             if (u != null) {
                 val key = u.toString()
                 holder.thumb.tag = key
+                boundThumbs[holder.thumb] = key
                 val cached = cache.get(key)
                 if (cached != null) {
                     holder.thumb.setImageBitmap(cached)
-                } else {
+                } else if (fastInFlight.add(key)) {
                     pool.execute {
-                        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
-                        val b: Bitmap? = try {
-                            loadMediaThumb(u)
-                        } catch (e: Exception) {
-                            null
-                        }
-                        if (b != null) {
-                            cache.put(key, b)
-                            runOnUiThread {
-                                if (holder.thumb.tag == key) holder.thumb.setImageBitmap(b)
+                        try {
+                            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+                            val aud = isAudio(u)
+                            val dur = videos.firstOrNull { it.uri == u }?.dur ?: 0L
+                            val b: Bitmap? = try {
+                                Media3ThumbExtractor.extractFast(this@MainActivity, u, aud, dur)
+                            } catch (_: Exception) {
+                                null
                             }
+                            if (b != null) {
+                                publishThumb(key, b)
+                            } else if (!aud && av1InFlight.add(key)) {
+                                av1ThumbPool.execute {
+                                    try {
+                                        android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+                                        val b2 = try {
+                                            Media3ThumbExtractor.extractAv1Fallback(this@MainActivity, u, dur)
+                                        } catch (_: Exception) {
+                                            null
+                                        }
+                                        if (b2 != null) publishThumb(key, b2)
+                                    } finally {
+                                        av1InFlight.remove(key)
+                                    }
+                                }
+                            }
+                        } finally {
+                            fastInFlight.remove(key)
                         }
                     }
                 }
+            } else {
+                holder.thumb.tag = null
+                boundThumbs.remove(holder.thumb)
             }
             return v
         }
@@ -1223,6 +1259,44 @@ class MainActivity : Activity() {
     private fun loadMediaThumb(u: Uri): Bitmap? {
         val dur = videos.firstOrNull { it.uri == u }?.dur ?: 0L
         return Media3ThumbExtractor.extract(this, u, isAudio(u), dur)
+    }
+
+    private fun publishThumb(key: String, bmp: Bitmap) {
+        cache.put(key, bmp)
+        runOnUiThread {
+            for ((iv, tKey) in boundThumbs.entries.toList()) {
+                if (tKey == key && iv.tag == key) {
+                    iv.setImageBitmap(bmp)
+                }
+            }
+        }
+    }
+
+    private fun prewarmAllThumbnails(list: List<V>) {
+        val gen = prewarmGen.incrementAndGet()
+        val snapshot = list.toList()
+        prewarmPool.execute {
+            android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_LOWEST)
+            for (v in snapshot) {
+                if (prewarmGen.get() != gen || isDestroyed || isFinishing) return@execute
+                val key = v.uri.toString()
+                if (cache.get(key) != null || Media3ThumbExtractor.hasDiskCache(this@MainActivity, key)) continue
+                try {
+                    val fast = Media3ThumbExtractor.extractFast(this@MainActivity, v.uri, false, v.dur)
+                    if (fast != null) {
+                        publishThumb(key, fast)
+                    } else {
+                        while (av1InFlight.isNotEmpty() && prewarmGen.get() == gen && !isDestroyed) {
+                            try { Thread.sleep(150L) } catch (_: Exception) { break }
+                        }
+                        if (prewarmGen.get() != gen || isDestroyed || isFinishing) return@execute
+                        val deep = Media3ThumbExtractor.extractAv1Fallback(this@MainActivity, v.uri, v.dur)
+                        if (deep != null) publishThumb(key, deep)
+                    }
+                } catch (_: Exception) {
+                }
+            }
+        }
     }
 
     // ================= mini player =================
