@@ -369,9 +369,12 @@ class MainActivity : Activity() {
     private fun tabBtn(t: String, sel: Boolean, ac: Int, tc: Int, f: () -> Unit): TextView {
         val v = TextView(this)
         v.text = t
-        v.textSize = 14f
+        v.textSize = 12.5f
+        v.maxLines = 1
+        v.setSingleLine(true)
+        v.ellipsize = TextUtils.TruncateAt.END
         v.gravity = Gravity.CENTER
-        v.setPadding(0, dp(10), 0, dp(10))
+        v.setPadding(dp(2), dp(10), dp(2), dp(10))
         if (sel) {
             v.setBackgroundColor(ac)
             v.setTextColor(contrast(ac))
@@ -770,20 +773,49 @@ class MainActivity : Activity() {
         startActivityForResult(i, 3)
     }
 
+    private fun pasteFromClipboard(): String {
+        val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
+        val clip = cm.primaryClip ?: return ""
+        if (clip.itemCount == 0) return ""
+        return clip.getItemAt(0).coerceToText(this)?.toString()?.trim() ?: ""
+    }
+
+    private fun openWatchLink(rawInput: String) {
+        val u = WebWatchActivity.extractFirstUrl(rawInput)
+        if (u.isEmpty() || (!u.startsWith("http://", true) && !u.startsWith("https://", true) && !u.startsWith("rtsp://", true))) {
+            toast("Valid YouTube, Facebook, Instagram ya stream link paste karein")
+            return
+        }
+        if (WebWatchActivity.isDirectStreamUrl(u)) {
+            val i = Intent(this, PlayerActivity::class.java)
+            i.data = Uri.parse(u)
+            startActivity(i)
+        } else {
+            val i = Intent(this, WebWatchActivity::class.java)
+            i.putExtra(WebWatchActivity.EXTRA_URL, u)
+            startActivity(i)
+        }
+    }
+
     private fun streamDialog() {
+        val box = LinearLayout(this)
+        box.orientation = LinearLayout.VERTICAL
+        box.setPadding(dp(16), dp(10), dp(16), dp(4))
         val et = EditText(this)
-        et.hint = "http://... or rtsp://..."
+        et.hint = "Paste YouTube, Facebook, Instagram (public) link"
+        et.setSingleLine(true)
+        box.addView(et)
+        val pasteBtn = Button(this)
+        pasteBtn.text = "Paste from Clipboard"
+        pasteBtn.setOnClickListener {
+            val txt = pasteFromClipboard()
+            if (txt.isNotEmpty()) et.setText(txt) else toast("Clipboard empty hai")
+        }
+        box.addView(pasteBtn)
         AlertDialog.Builder(this)
-            .setTitle("Network Stream URL")
-            .setView(et)
-            .setPositiveButton("Play") { _, _ ->
-                val u = et.text.toString().trim()
-                if (u.isNotEmpty()) {
-                    val i = Intent(this, PlayerActivity::class.java)
-                    i.data = Uri.parse(u)
-                    startActivity(i)
-                }
-            }
+            .setTitle("Watch Online Video")
+            .setView(box)
+            .setPositiveButton("Watch") { _, _ -> openWatchLink(et.text.toString()) }
             .setNegativeButton("Cancel", null)
             .show()
     }
@@ -1350,7 +1382,7 @@ class MainActivity : Activity() {
         navRow.gravity = Gravity.CENTER_VERTICAL
         navRow.setPadding(0, dp(8), 0, dp(8))
         val tabs = LinearLayout(this)
-        val tabNames = arrayOf("Videos", "Folders", "Music", "Playlist")
+        val tabNames = arrayOf("Videos", "Folders", "Music", "Playlist", "Watch")
         for (i in tabNames.indices) {
             tabs.addView(tabBtn(tabNames[i], tab == i, ac, tc) {
                 tab = i
@@ -1452,6 +1484,38 @@ class MainActivity : Activity() {
                 val l = groups[k] ?: continue
                 items.add(Item(folderName(k), l.size.toString() + " videos", l[0].uri, l.size.toString(), "F:" + k, ""))
             }
+        }
+
+        if (tab == 4 && !conversionSelectMode) {
+            val wBox = LinearLayout(this)
+            wBox.orientation = LinearLayout.VERTICAL
+            wBox.setPadding(dp(8), dp(10), dp(8), dp(10))
+
+            wBox.addView(label("Watch Public Online Videos", 17f, ac))
+            wBox.addView(label("YouTube, Facebook (public) ya Instagram (public) video link paste karein aur direct watch karein.", 13f, tc))
+
+            val urlInput = EditText(this)
+            urlInput.hint = "Paste YouTube / Facebook / Instagram link..."
+            urlInput.setTextColor(tc)
+            urlInput.setHintTextColor((tc and 0x00FFFFFF) or 0x77000000)
+            urlInput.setSingleLine(true)
+            wBox.addView(urlInput, LinearLayout.LayoutParams(MP, WC).apply { topMargin = dp(8); bottomMargin = dp(10) })
+
+            val btnRow = LinearLayout(this)
+            btnRow.gravity = Gravity.CENTER_VERTICAL
+            val bPaste = button("Paste", ac) {
+                val txt = pasteFromClipboard()
+                if (txt.isNotEmpty()) urlInput.setText(txt) else toast("Clipboard empty hai")
+            }
+            val bWatch = button("Watch Video", ac) {
+                openWatchLink(urlInput.text.toString())
+            }
+            btnRow.addView(bPaste, LinearLayout.LayoutParams(0, WC, 1f).apply { rightMargin = dp(6) })
+            btnRow.addView(bWatch, LinearLayout.LayoutParams(0, WC, 1f).apply { leftMargin = dp(6) })
+            wBox.addView(btnRow, LinearLayout.LayoutParams(MP, WC))
+
+            listHolder.addView(wBox, LinearLayout.LayoutParams(MP, MP))
+            return
         }
 
         if (items.isEmpty()) {
