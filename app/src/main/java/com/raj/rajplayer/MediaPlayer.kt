@@ -286,18 +286,10 @@ class MediaPlayer(val player: ExoPlayer) {
 
     fun setVideoScale(scale: ScaleType) {
         scaleType = scale
-
         try {
-            player.setVideoScalingMode(
-                if (scale == ScaleType.SURFACE_FILL) {
-                    C.VIDEO_SCALING_MODE_SCALE_TO_FIT_WITH_CROPPING
-                } else {
-                    C.VIDEO_SCALING_MODE_SCALE_TO_FIT
-                }
-            )
+            player.setVideoScalingMode(C.VIDEO_SCALING_MODE_SCALE_TO_FIT)
         } catch (_: Exception) {
         }
-
         adjustSurface()
     }
 
@@ -308,9 +300,12 @@ class MediaPlayer(val player: ExoPlayer) {
 
     private fun adjustVideoView(view: android.view.View) {
         val parent = host ?: return
+        parent.clipChildren = true
+        parent.clipToPadding = true
 
-        val vw = player.videoSize.width
-        val vh = player.videoSize.height
+        val vs = player.videoSize
+        val vw = vs.width
+        val vh = vs.height
 
         if (parent.width <= 0 || parent.height <= 0) {
             parent.post {
@@ -323,23 +318,36 @@ class MediaPlayer(val player: ExoPlayer) {
 
         if (vw <= 0 || vh <= 0) return
 
+        PerfBoost.applySurfaceFrameRate(surface?.holder?.surface)
+
         val frameW = parent.width
         val frameH = parent.height
-
-        val aspect = vw.toFloat() / vh.toFloat()
+        val par = if (vs.pixelWidthHeightRatio > 0f) vs.pixelWidthHeightRatio else 1f
+        val aspect = (vw.toFloat() * par) / vh.toFloat()
         val frameAspect = frameW.toFloat() / frameH.toFloat()
 
         val lp = view.layoutParams as? FrameLayout.LayoutParams ?: return
 
         when (scaleType) {
+            ScaleType.SURFACE_FIT_SCREEN -> {
+                // Proportional full-screen crop-to-fill: removes black bars cleanly on all videos (incl. AV1 & cinema bars)
+                if (frameAspect > aspect) {
+                    lp.width = frameW
+                    lp.height = (frameW / aspect).toInt().coerceAtLeast(frameH)
+                } else {
+                    lp.height = frameH
+                    lp.width = (frameH * aspect).toInt().coerceAtLeast(frameW)
+                }
+            }
+
             ScaleType.SURFACE_FILL -> {
+                // Exact full-screen stretch without cropping
                 lp.width = frameW
                 lp.height = frameH
             }
 
             ScaleType.SURFACE_16_9 -> {
                 val a = 16f / 9f
-
                 if (frameAspect > a) {
                     lp.height = frameH
                     lp.width = (frameH * a).toInt()
@@ -351,7 +359,6 @@ class MediaPlayer(val player: ExoPlayer) {
 
             ScaleType.SURFACE_4_3 -> {
                 val a = 4f / 3f
-
                 if (frameAspect > a) {
                     lp.height = frameH
                     lp.width = (frameH * a).toInt()
@@ -362,12 +369,25 @@ class MediaPlayer(val player: ExoPlayer) {
             }
 
             ScaleType.SURFACE_ORIGINAL -> {
-                lp.width = vw.coerceAtMost(frameW)
-                lp.height = vh.coerceAtMost(frameH)
+                val effW = (vw * par).toInt().coerceAtLeast(1)
+                if (effW <= frameW && vh <= frameH) {
+                    lp.width = effW
+                    lp.height = vh
+                } else if (frameAspect > aspect) {
+                    lp.height = frameH
+                    lp.width = (frameH * aspect).toInt()
+                } else {
+                    lp.width = frameW
+                    lp.height = (frameW / aspect).toInt()
+                }
             }
 
             else -> {
-                if (frameAspect > aspect) {
+                // SURFACE_BEST_FIT: clean proportional fit inside screen
+                if (kotlin.math.abs(frameAspect - aspect) / frameAspect < 0.025f) {
+                    lp.width = frameW
+                    lp.height = frameH
+                } else if (frameAspect > aspect) {
                     lp.height = frameH
                     lp.width = (frameH * aspect).toInt()
                 } else {
@@ -379,6 +399,7 @@ class MediaPlayer(val player: ExoPlayer) {
 
         lp.gravity = android.view.Gravity.CENTER
         view.layoutParams = lp
+        view.requestLayout()
     }
 
     private fun tracks(type: Int): Array<TrackDescription> {

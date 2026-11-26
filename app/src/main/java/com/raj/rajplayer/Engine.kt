@@ -66,6 +66,7 @@ object Engine {
     private var wake: PowerManager.WakeLock? = null
     private var wifi: WifiManager.WifiLock? = null
     private val sleepRun = Runnable { pause(); notifyChanged() }
+    private var playbackThread: android.os.HandlerThread? = null
 
     private fun holdLocks() {
         try {
@@ -111,7 +112,7 @@ object Engine {
                 100,
                 250
             )
-            .setTargetBufferBytes(if (lowMem) 20 * 1024 * 1024 else 48 * 1024 * 1024)
+            .setTargetBufferBytes(if (lowMem) 24 * 1024 * 1024 else 80 * 1024 * 1024)
             .setBackBuffer(if (lowMem) 3000 else 5000, false)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
@@ -167,7 +168,18 @@ object Engine {
             .setUsage(androidx.media3.common.C.USAGE_MEDIA)
             .setContentType(androidx.media3.common.C.AUDIO_CONTENT_TYPE_MUSIC)
             .build()
+        val pbThread = playbackThread ?: android.os.HandlerThread(
+            "RajPlayer:Playback",
+            android.os.Process.THREAD_PRIORITY_URGENT_AUDIO
+        ).apply {
+            start()
+            playbackThread = this
+        }
+        android.os.Handler(pbThread.looper).post {
+            PerfBoost.setPlaybackThreadId(android.os.Process.myTid())
+        }
         val exo = ExoPlayer.Builder(app, renderers)
+            .setPlaybackLooper(pbThread.looper)
             .setLoadControl(loadControl)
             .setAudioAttributes(mediaAudioAttrs, false)
             .setWakeMode(androidx.media3.common.C.WAKE_MODE_LOCAL)
@@ -175,6 +187,27 @@ object Engine {
             .setDetachSurfaceTimeoutMs(300L)
             .build()
         exo.setPriority(androidx.media3.common.C.PRIORITY_PLAYBACK)
+        exo.addListener(object : Player.Listener {
+            override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
+                PerfBoost.updateVideoDimensions(videoSize.width, videoSize.height)
+            }
+            override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                for (g in tracks.groups) {
+                    if (g.type == androidx.media3.common.C.TRACK_TYPE_VIDEO && g.isSelected) {
+                        for (i in 0 until g.length) {
+                            if (g.isTrackSelected(i)) {
+                                val f = g.getTrackFormat(i)
+                                PerfBoost.updateVideoProfile(f.width, f.height, f.sampleMimeType, f.codecs, f.frameRate, videoDecoderName)
+                                return
+                            }
+                        }
+                    }
+                }
+            }
+            override fun onIsPlayingChanged(isPlaying: Boolean) {
+                PerfBoost.setPlaying(isPlaying && isVideo)
+            }
+        })
         exo.setPlaybackParameters(PlaybackParameters(1f, 1f))
         exo.setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
         exo.setVideoScalingMode(androidx.media3.common.C.VIDEO_SCALING_MODE_SCALE_TO_FIT)
@@ -328,7 +361,7 @@ object Engine {
         idx = i.coerceIn(0, items.size - 1)
         val uri = items[idx]
         title = names.getOrNull(idx) ?: nameOf(app, uri)
-        val resume = Prefs.pos(app, uri.toString())
+        val resume = if (isVideo || Prefs.audioResume(app)) Prefs.pos(app, uri.toString()) else 0L
         Prefs.setLastPlayedUri(app, uri.toString())
         val needsFreshSurface = isVideo && (
             forceDav1dForCurrentItem ||
@@ -421,12 +454,13 @@ object Engine {
         val p = mp ?: return
         if (!active || items.isEmpty()) return
         val len = p.getLength(); val t = p.getTime(); val key = items[idx].toString()
-        if (len > 0 && t > 5000 && t < len - 5000) Prefs.setPos(app, key, t) else Prefs.setPos(app, key, 0L)
+        if (!isVideo && !Prefs.audioResume(app)) Prefs.setPos(app, key, 0L) else if (len > 0 && t > 5000 && t < len - 5000) Prefs.setPos(app, key, t) else Prefs.setPos(app, key, 0L)
     }
     fun sleep(minutes: Int) { main.removeCallbacks(sleepRun); if (minutes > 0) main.postDelayed(sleepRun, minutes * 60000L) }
     fun stopAll(ctx: Context) {
         saveProgress(); main.removeCallbacks(sleepRun); resumeOnFocus = false; resumeAfterBluetooth = false
         try { mp?.player?.stop(); mp?.player?.release() } catch (_: Exception) { }
+        PerfBoost.resetProfile()
         mp = null; active = false; ended = false; releaseLocks(); PlaybackService.stop(ctx); listener?.onItemChanged()
     }
     fun notifyChanged() { if (isPlaying()) holdLocks(); PlaybackService.instance?.refresh() }

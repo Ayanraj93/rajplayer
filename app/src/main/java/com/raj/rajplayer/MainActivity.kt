@@ -383,7 +383,7 @@ class MainActivity : Activity() {
     private fun tabBtn(t: String, sel: Boolean, ac: Int, tc: Int, f: () -> Unit): TextView {
         val v = TextView(this)
         v.text = t
-        v.textSize = 12.5f
+        v.textSize = 14f
         v.maxLines = 1
         v.setSingleLine(true)
         v.ellipsize = TextUtils.TruncateAt.END
@@ -788,57 +788,23 @@ class MainActivity : Activity() {
         startActivityForResult(i, 3)
     }
 
-    private fun pasteFromClipboard(): String {
-        val cm = getSystemService(CLIPBOARD_SERVICE) as android.content.ClipboardManager
-        val clip = cm.primaryClip ?: return ""
-        if (clip.itemCount == 0) return ""
-        return clip.getItemAt(0).coerceToText(this)?.toString()?.trim() ?: ""
-    }
-
-    private fun openOnlineLink(rawInput: String, downloadMode: Boolean) {
-        val u = WebDownloaderActivity.extractFirstUrl(rawInput)
-        if (u.isEmpty() || (!u.startsWith("http://", true) && !u.startsWith("https://", true) && !u.startsWith("rtsp://", true))) {
-            toast("Valid YouTube, Facebook ya Instagram link paste karein")
-            return
-        }
-        if (!downloadMode && WebDownloaderActivity.isDirectStreamUrl(u)) {
-            val i = Intent(this, PlayerActivity::class.java)
-            i.data = Uri.parse(u)
-            startActivity(i)
-            return
-        }
-        if (downloadMode) {
-            val i = Intent(this, WebDownloaderActivity::class.java)
-            i.putExtra(WebDownloaderActivity.EXTRA_URL, u)
-            i.putExtra(WebDownloaderActivity.EXTRA_DOWNLOAD_MODE, true)
-            startActivity(i)
-        } else {
-            val i = Intent(this, WebWatchActivity::class.java)
-            i.putExtra(WebWatchActivity.EXTRA_URL, u)
-            startActivity(i)
-        }
-    }
-
     private fun streamDialog() {
-        val box = LinearLayout(this)
-        box.orientation = LinearLayout.VERTICAL
-        box.setPadding(dp(16), dp(10), dp(16), dp(4))
         val et = EditText(this)
-        et.hint = "Paste YouTube, Facebook, Instagram link"
+        et.hint = "Direct stream URL (http/https/rtsp)"
         et.setSingleLine(true)
-        box.addView(et)
-        val pBtn = Button(this)
-        pBtn.text = "Paste from Clipboard"
-        pBtn.setOnClickListener {
-            val txt = pasteFromClipboard()
-            if (txt.isNotEmpty()) et.setText(txt) else toast("Clipboard empty hai")
-        }
-        box.addView(pBtn)
         AlertDialog.Builder(this)
-            .setTitle("Online Video (Watch / Download)")
-            .setView(box)
-            .setPositiveButton("Download") { _, _ -> openOnlineLink(et.text.toString(), true) }
-            .setNeutralButton("Watch") { _, _ -> openOnlineLink(et.text.toString(), false) }
+            .setTitle("Play Direct Stream")
+            .setView(et)
+            .setPositiveButton("Play") { _, _ ->
+                val u = et.text.toString().trim()
+                if (u.startsWith("http://", true) || u.startsWith("https://", true) || u.startsWith("rtsp://", true)) {
+                    val i = Intent(this, PlayerActivity::class.java)
+                    i.data = Uri.parse(u)
+                    startActivity(i)
+                } else {
+                    toast("Valid stream URL daalein")
+                }
+            }
             .setNegativeButton("Cancel", null)
             .show()
     }
@@ -1464,7 +1430,7 @@ class MainActivity : Activity() {
         navRow.gravity = Gravity.CENTER_VERTICAL
         navRow.setPadding(0, dp(8), 0, dp(8))
         val tabs = LinearLayout(this)
-        val tabNames = arrayOf("Videos", "Folders", "Music", "Playlist", "Online")
+        val tabNames = arrayOf("Videos", "Folders", "Music", "Playlist")
         for (i in tabNames.indices) {
             tabs.addView(tabBtn(tabNames[i], tab == i, ac, tc) {
                 tab = i
@@ -1566,38 +1532,6 @@ class MainActivity : Activity() {
                 val l = groups[k] ?: continue
                 items.add(Item(folderName(k), l.size.toString() + " videos", l[0].uri, l.size.toString(), "F:" + k, ""))
             }
-        }
-
-        if (tab == 4 && !conversionSelectMode) {
-            val wBox = LinearLayout(this)
-            wBox.orientation = LinearLayout.VERTICAL
-            wBox.setPadding(dp(8), dp(10), dp(8), dp(10))
-
-            wBox.addView(label("Online Watch & Downloader", 17f, ac))
-            wBox.addView(label("Instagram (indown.io), Facebook (fdown.net) ya YouTube (y2mate) ka link paste karein. Downloads Download/RajPlayer mein save honge.", 13f, tc))
-
-            val urlInput = EditText(this)
-            urlInput.hint = "Paste YouTube / Facebook / Instagram link..."
-            urlInput.setTextColor(tc)
-            urlInput.setHintTextColor((tc and 0x00FFFFFF) or 0x77000000)
-            urlInput.setSingleLine(true)
-            wBox.addView(urlInput, LinearLayout.LayoutParams(MP, WC).apply { topMargin = dp(8); bottomMargin = dp(10) })
-
-            val btnRow = LinearLayout(this)
-            btnRow.gravity = Gravity.CENTER_VERTICAL
-            val bPaste = button("Paste", ac) {
-                val txt = pasteFromClipboard()
-                if (txt.isNotEmpty()) urlInput.setText(txt) else toast("Clipboard empty hai")
-            }
-            val bWatch = button("Watch", ac) { openOnlineLink(urlInput.text.toString(), false) }
-            val bDl = button("Download", ac) { openOnlineLink(urlInput.text.toString(), true) }
-            btnRow.addView(bPaste, LinearLayout.LayoutParams(0, WC, 1f).apply { rightMargin = dp(4) })
-            btnRow.addView(bWatch, LinearLayout.LayoutParams(0, WC, 1f).apply { leftMargin = dp(4); rightMargin = dp(4) })
-            btnRow.addView(bDl, LinearLayout.LayoutParams(0, WC, 1f).apply { leftMargin = dp(4) })
-            wBox.addView(btnRow, LinearLayout.LayoutParams(MP, WC))
-
-            listHolder.addView(wBox, LinearLayout.LayoutParams(MP, MP))
-            return
         }
 
         if (items.isEmpty()) {
@@ -1869,6 +1803,9 @@ class MainActivity : Activity() {
             Prefs.setBgAudio(this, !Prefs.bgAudio(this))
             Engine.bgAudio = Prefs.bgAudio(this)
         }
+        toggle(root, "Audio Player Resume (OFF = Always 0:00)", Prefs.audioResume(this), ac) {
+            Prefs.setAudioResume(this, !Prefs.audioResume(this))
+        }
         root.addView(label(
             "Audio Mode and Music Player notifications stay active as before. Turning Video Background Play OFF pauses normal videos when returning to the main list.",
             12f, tc
@@ -1877,6 +1814,16 @@ class MainActivity : Activity() {
         // ---- video / playback ----
         root.addView(label("Video & Playback", 16f, tc))
         toggle(root, "Auto-rotate to match video", Prefs.autoOrient(this), ac) { Prefs.setAutoOrient(this, !Prefs.autoOrient(this)) }
+        val fitLabels = arrayOf("Fit (Original Ratio)", "Screen (Full Crop Fit)", "Fill (Full Stretch)", "16:9", "4:3", "Original Size")
+        root.addView(button("Default Video Screen Fit: " + fitLabels[Prefs.videoScale(this).coerceIn(0, 5)], ac) {
+            AlertDialog.Builder(this)
+                .setTitle("Default Video Screen Fit")
+                .setItems(fitLabels) { _, idx ->
+                    Prefs.setVideoScale(this, idx)
+                    refreshSettings()
+                }
+                .show()
+        })
         root.addView(button("Background Activity (Battery): " + (if (Power.isIgnoring(this)) "ALLOWED \u2705" else "Tap to allow"), ac) {
             Power.request(this)
         })

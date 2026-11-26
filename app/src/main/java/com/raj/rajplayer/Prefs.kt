@@ -173,6 +173,11 @@ object Prefs {
     fun bgAudio(c: Context): Boolean = p(c).getBoolean("bg_audio2", true)
     fun setBgAudio(c: Context, v: Boolean) { p(c).edit().putBoolean("bg_audio2", v).apply() }
 
+    fun audioResume(c: Context): Boolean = p(c).getBoolean("audio_resume", false)
+    fun setAudioResume(c: Context, v: Boolean) { p(c).edit().putBoolean("audio_resume", v).apply() }
+    fun videoScale(c: Context): Int = p(c).getInt("video_scale_mode", 1).coerceIn(0, 5)
+    fun setVideoScale(c: Context, v: Int) { p(c).edit().putInt("video_scale_mode", v.coerceIn(0, 5)).apply() }
+
     // audio ke repeat/shuffle
     fun repeat(c: Context): Int = p(c).getInt("repeat", 0)
     fun setRepeat(c: Context, v: Int) { p(c).edit().putInt("repeat", v).apply() }

@@ -465,6 +465,7 @@ open class PlayerActivity : Activity() {
             lockBtn.visibility = View.VISIBLE
         }
         startControlAnimations()
+        PerfBoost.setControlsVisible(this, true)
         ui.removeCallbacks(hideRun)
     }
 
@@ -492,6 +493,7 @@ open class PlayerActivity : Activity() {
         controls.visibility = View.GONE
         lockBtn.visibility = View.GONE
         stopControlAnimations()
+        PerfBoost.setControlsVisible(this, false)
         ui.removeCallbacks(hideRun)
     }
 
@@ -1370,6 +1372,7 @@ open class PlayerActivity : Activity() {
                 gd.onTouchEvent(cancel)
                 cancel.recycle()
             }
+            PerfBoost.onUserTouch(this)
             scaleDetector.onTouchEvent(ev)
             if (!zooming) {
                 gd.onTouchEvent(ev)
@@ -1642,10 +1645,14 @@ open class PlayerActivity : Activity() {
             true
         }
         exRow.addView(speedBtn)
-        exRow.addView(ib("Fit", 14f) { b ->
+        scaleIdx = Prefs.videoScale(this).coerceIn(0, scales.lastIndex)
+        mp.setVideoScale(scales[scaleIdx])
+        exRow.addView(ib(scaleNames[scaleIdx], 14f) { b ->
             scaleIdx = (scaleIdx + 1) % scales.size
+            Prefs.setVideoScale(this, scaleIdx)
             mp.setVideoScale(scales[scaleIdx])
             b.text = scaleNames[scaleIdx]
+            showMsg("Screen: " + scaleNames[scaleIdx])
             resetZoom()
             showControls()
         })
@@ -2072,6 +2079,7 @@ open class PlayerActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
+        PerfBoost.attachActivity(this)
         Engine.playerForeground = true
         Engine.modeSwitching = false
         if (audioMode) {
