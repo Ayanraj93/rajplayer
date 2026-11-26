@@ -98,5 +98,11 @@
             android:exported="false"
             android:hardwareAccelerated="true"
             android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout|uiMode" />
+
+        <activity
+            android:name=".WebDownloaderActivity"
+            android:exported="false"
+            android:hardwareAccelerated="true"
+            android:configChanges="orientation|screenSize|keyboardHidden|smallestScreenSize|screenLayout|uiMode" />
     </application>
 </manifest>
