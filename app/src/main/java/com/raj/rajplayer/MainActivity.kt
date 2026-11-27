@@ -1320,10 +1320,10 @@ class MainActivity : Activity() {
             • Back to Video: reopen the video player
 
             MAIN SCREEN
-            • Long press RajPlayer title: open multiple-video selection for conversion
+            • Long press Love Player title: open multiple-video selection for conversion
         """.trimIndent()
         AlertDialog.Builder(this)
-            .setTitle("RajPlayer Gesture Guide")
+            .setTitle("Love Player Gesture Guide")
             .setMessage(message)
             .setPositiveButton("Got it") { _, _ ->
                 prefs.edit().putBoolean("shown", true).apply()
@@ -1386,13 +1386,47 @@ class MainActivity : Activity() {
             }
         } else {
             selCountTv = null
-            // "RajPlayer Pro" ka chalta-phirta RGB title
+            val brandRow = LinearLayout(this)
+            brandRow.orientation = LinearLayout.HORIZONTAL
+            brandRow.gravity = Gravity.CENTER_VERTICAL
+
+            val appIcon = ImageView(this)
+            appIcon.scaleType = ImageView.ScaleType.FIT_CENTER
+            try {
+                appIcon.setImageDrawable(applicationInfo.loadIcon(packageManager))
+            } catch (_: Exception) {
+                appIcon.setImageResource(R.mipmap.ic_launcher)
+            }
+            val iconLp = LinearLayout.LayoutParams(dp(26), dp(26))
+            iconLp.marginEnd = dp(8)
+            brandRow.addView(appIcon, iconLp)
+            val blinkAnim = android.animation.ObjectAnimator.ofFloat(appIcon, "alpha", 1f, 0.55f).apply {
+                duration = 1100L
+                repeatMode = android.animation.ValueAnimator.REVERSE
+                repeatCount = android.animation.ValueAnimator.INFINITE
+                interpolator = android.view.animation.AccelerateDecelerateInterpolator()
+            }
+            appIcon.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+                override fun onViewAttachedToWindow(v: View) {
+                    if (!blinkAnim.isStarted) blinkAnim.start()
+                }
+                override fun onViewDetachedFromWindow(v: View) {
+                    blinkAnim.cancel()
+                    v.alpha = 1f
+                }
+            })
+            if (appIcon.isAttachedToWindow && !blinkAnim.isStarted) blinkAnim.start()
+
             val brand = RgbTextView(this)
-            brand.text = "\u26A1 RajPlayer Pro"
-            brand.textSize = 22f
+            brand.text = "Love Player"
+            brand.textSize = 20f
             brand.setTypeface(null, Typeface.BOLD)
+            brand.setSingleLine(true)
+            brand.ellipsize = android.text.TextUtils.TruncateAt.END
+            brandRow.addView(brand, LinearLayout.LayoutParams(0, WC, 1f))
+
             // Long-press avoids accidental conversion selection while tapping the title.
-            brand.setOnLongClickListener {
+            brandRow.setOnLongClickListener {
                 selectMode = true
                 conversionSelectMode = true
                 tab = 0
@@ -1404,7 +1438,7 @@ class MainActivity : Activity() {
                 showHome()
                 true
             }
-            head.addView(brand, LinearLayout.LayoutParams(0, WC, 1f))
+            head.addView(brandRow, LinearLayout.LayoutParams(0, WC, 1f))
             head.addView(sym("\uD83D\uDD0D", ic) {
                 searchOn = !searchOn
                 if (!searchOn) query = ""
@@ -1741,7 +1775,7 @@ class MainActivity : Activity() {
         })
 
         // ==== SECTION 1: RAJPLAYER CUSTOMIZATION ====
-        root.addView(label("1. RajPlayer Customization", 18f, ac))
+        root.addView(label("1. Love Player Customization", 18f, ac))
 
         // ---- theme presets ----
         root.addView(label("Theme Presets", 16f, tc))
