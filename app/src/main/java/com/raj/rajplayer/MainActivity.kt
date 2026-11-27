@@ -843,7 +843,7 @@ class MainActivity : Activity() {
                     3 -> {
                         val added = Prefs.toggleFav(this, u.toString())
                         toast(if (added) "Added to Playlist" else "Removed from Playlist")
-                        if (tab == 3) showHome()
+                        if (tab == 2) showHome()
                     }
                     4 -> if (aud) {
                         selected.clear()
@@ -1430,7 +1430,7 @@ class MainActivity : Activity() {
         navRow.gravity = Gravity.CENTER_VERTICAL
         navRow.setPadding(0, dp(8), 0, dp(8))
         val tabs = LinearLayout(this)
-        val tabNames = arrayOf("Videos", "Folders", "Music", "Playlist")
+        val tabNames = arrayOf("Videos", "Music", "Playlist")
         for (i in tabNames.indices) {
             tabs.addView(tabBtn(tabNames[i], tab == i, ac, tc) {
                 tab = i
@@ -1507,37 +1507,33 @@ class MainActivity : Activity() {
         val of = openFolder
         val q = query.trim().lowercase()
 
+        if (tab !in 0..2) tab = 0
         if (conversionSelectMode) {
             shown = videos
             for (v in shown) items.add(itemOf(v, "V"))
-        } else if (q.isNotEmpty()) {
-            shown = (videos + audios).filter { it.name.lowercase().contains(q) }
-            for (v in shown) items.add(itemOf(v, if (isAudio(v.uri)) "\uD83C\uDFB5" else "V"))
-        } else if (tab == 3) {
-            val favSet = Prefs.favs(this)
-            shown = videos.filter { favSet.contains(it.uri.toString()) } + audios.filter { favSet.contains(it.uri.toString()) }
-            for (v in shown) items.add(itemOf(v, "\u2B50"))
         } else if (tab == 2) {
+            val favSet = Prefs.favs(this)
+            val favItems = videos.filter { favSet.contains(it.uri.toString()) } + audios.filter { favSet.contains(it.uri.toString()) }
+            shown = if (q.isNotEmpty()) favItems.filter { it.name.lowercase().contains(q) } else favItems
+            for (v in shown) items.add(itemOf(v, "\u2B50"))
+        } else if (tab == 1) {
             val minDuration = Prefs.audioMinDurationMs(this)
-            shown = if (minDuration <= 0L) audios
-                    else audios.filter { it.dur >= minDuration }
+            val baseAudios = if (minDuration <= 0L) audios else audios.filter { it.dur >= minDuration }
+            shown = if (q.isNotEmpty()) baseAudios.filter { it.name.lowercase().contains(q) } else baseAudios
             for (v in shown) items.add(itemOf(v, "\uD83C\uDFB5"))
-        } else if (tab == 0 || of != null) {
-            shown = if (of != null) videos.filter { it.folder == of } else videos
-            for (v in shown) items.add(itemOf(v, "V"))
         } else {
-            val groups = videos.groupBy { it.folder }
-            val keys = groups.keys.sortedBy { folderName(it).lowercase() }
-            for (k in keys) {
-                val l = groups[k] ?: continue
-                items.add(Item(folderName(k), l.size.toString() + " videos", l[0].uri, l.size.toString(), "F:" + k, ""))
-            }
+            val baseVideos = if (of != null) videos.filter { it.folder == of } else videos
+            shown = if (q.isNotEmpty()) baseVideos.filter { it.name.lowercase().contains(q) } else baseVideos
+            for (v in shown) items.add(itemOf(v, "V"))
         }
 
         if (items.isEmpty()) {
             val emptyMsg = when {
                 loading -> "Loading..."
-                tab == 3 -> "Playlist is empty. Long-press an item and choose Add to Playlist."
+                tab == 2 && q.isNotEmpty() -> "No matching items in Playlist."
+                tab == 2 -> "Playlist is empty. Long-press an item and choose Add to Playlist."
+                tab == 1 && q.isNotEmpty() -> "No matching music found."
+                tab == 0 && q.isNotEmpty() -> "No matching video found."
                 else -> "No items found."
             }
             val empty = FrameLayout(this)
@@ -1550,10 +1546,10 @@ class MainActivity : Activity() {
 
         val col = LinearLayout(this)
         col.orientation = LinearLayout.VERTICAL
-        if (of != null && q.isEmpty() && tab != 2 && tab != 3) col.addView(label("\uD83D\uDCC1 " + folderName(of), 15f, tc))
+        if (of != null && q.isEmpty() && tab == 0) col.addView(label("\uD83D\uDCC1 " + folderName(of), 15f, tc))
 
-        if ((tab == 0 || tab == 1) && !hasVideoPerm()) col.addView(button("Allow All Videos (Full Storage Access)", ac) { if (hasLimitedVisualPerm()) openAppSettings() else reqPerms() })
-        if ((tab == 0 || tab == 1) && Build.VERSION.SDK_INT >= 30 && !hasAllFilesAccess()) col.addView(button("Allow All Files Access (Show All 4K / MKV Videos)", ac) { openAllFilesSettings() })
+        if (tab == 0 && !hasVideoPerm()) col.addView(button("Allow All Videos (Full Storage Access)", ac) { if (hasLimitedVisualPerm()) openAppSettings() else reqPerms() })
+        if (tab == 0 && Build.VERSION.SDK_INT >= 30 && !hasAllFilesAccess()) col.addView(button("Allow All Files Access (Show All 4K / MKV Videos)", ac) { openAllFilesSettings() })
         val lv = ListView(this)
         lv.divider = null
         val ad = makeAdapter(items, tc, ac)
