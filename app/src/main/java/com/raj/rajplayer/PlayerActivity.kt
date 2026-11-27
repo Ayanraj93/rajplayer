@@ -1242,7 +1242,9 @@ open class PlayerActivity : Activity() {
 
     override fun onBackPressed() {
         if (audioMode) {
-            returnToVideo()
+            val i = Intent(this, MainActivity::class.java)
+                .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
+            startActivity(i)
             return
         }
         if (locked) {
